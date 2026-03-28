@@ -15,6 +15,10 @@ type LoginResponse = {
   token: string;
   authProvider?: string | null;
   hasLocalPassword?: boolean | null;
+  profileImageData?: string | null;
+  profileImageScale?: number | null;
+  profileImageOffsetX?: number | null;
+  profileImageOffsetY?: number | null;
 };
 
 type GoogleLoginApiResponse = {
@@ -31,6 +35,10 @@ type GoogleLoginApiResponse = {
   error?: string | null;
   authProvider?: string | null;
   hasLocalPassword?: boolean | null;
+  profileImageData?: string | null;
+  profileImageScale?: number | null;
+  profileImageOffsetX?: number | null;
+  profileImageOffsetY?: number | null;
 };
 
 type GoogleTokenResponse = {
@@ -177,6 +185,10 @@ export default function Home() {
           token: data.token,
           authProvider: data.authProvider ?? "google",
           hasLocalPassword: data.hasLocalPassword ?? false,
+          profileImageData: data.profileImageData ?? null,
+          profileImageScale: data.profileImageScale ?? null,
+          profileImageOffsetX: data.profileImageOffsetX ?? null,
+          profileImageOffsetY: data.profileImageOffsetY ?? null,
         });
       } catch {
         setError("No hay conexion con la API para login con Google.");
@@ -330,7 +342,7 @@ export default function Home() {
           <div className="flex min-h-screen w-full items-center justify-center p-6 sm:p-8 lg:p-10">
             <div className="w-full max-w-xl">
               <div className="mb-6 flex justify-center">
-                <Image src="/a21k.png" alt="Logo SmartLearn" width={300} height={84} priority />
+                <Image src="/smartlearn.png" alt="Logo SmartLearn" width={300} height={84} priority />
               </div>
 
               <div className="mb-7 text-center">

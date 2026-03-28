@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -230,7 +230,7 @@ const mergeGroupState = (previous: ExamGroupState | null, incoming: ExamGroupSta
   const previousIndex = previous.currentQuestionIndex ?? 0;
   const incomingIndex = incoming.currentQuestionIndex ?? 0;
 
-  // Ignorar snapshots tardíos que regresan a una pregunta anterior.
+  // Ignorar snapshots tardÃ­os que regresan a una pregunta anterior.
   if (previousStatus === "active" && incomingStatus === "active" && incomingIndex < previousIndex) {
     return previous;
   }
@@ -489,6 +489,8 @@ type ShareNotificationItem = {
   resourceName?: string | null;
   message?: string | null;
   token?: string | null;
+  invitationStatus?: "pending" | "accepted" | "rejected" | string | null;
+  invitationRespondedAt?: unknown;
   readAt?: unknown;
   createdAt?: unknown;
 };
@@ -1182,8 +1184,20 @@ function isShareNotificationPayload(value: unknown): value is ShareNotificationI
     typeof record.id === "number" &&
     typeof record.resourceType === "string" &&
     typeof record.resourceId === "number" &&
-    (!("token" in record) || record.token == null || typeof record.token === "string")
+    (!("token" in record) || record.token == null || typeof record.token === "string") &&
+    (!("invitationStatus" in record) || record.invitationStatus == null || typeof record.invitationStatus === "string")
   );
+}
+
+function normalizeInvitationStatus(value: unknown): "pending" | "accepted" | "rejected" {
+  if (typeof value !== "string") {
+    return "accepted";
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "pending" || normalized === "accepted" || normalized === "rejected") {
+    return normalized;
+  }
+  return "accepted";
 }
 
 function isSupportConversationPayload(value: unknown): value is SupportConversationItem {
@@ -1513,6 +1527,7 @@ export default function DashboardPage() {
   const [closingGroupWaitingRoom, setClosingGroupWaitingRoom] = useState(false);
   const [showGroupRoomClosedModal, setShowGroupRoomClosedModal] = useState(false);
   const [groupRoomClosedMessage, setGroupRoomClosedMessage] = useState("La sala grupal fue cerrada por el anfitrion.");
+  const [groupRoomClosedKeepViewing, setGroupRoomClosedKeepViewing] = useState(false);
   const [submittingGroupAnswer, setSubmittingGroupAnswer] = useState(false);
   const [advancingGroupQuestion, setAdvancingGroupQuestion] = useState(false);
   const [closingAndRestartingGroupPractice, setClosingAndRestartingGroupPractice] = useState(false);
@@ -1645,6 +1660,7 @@ export default function DashboardPage() {
   } | null>(null);
   const [creatingShareLink, setCreatingShareLink] = useState(false);
   const [publicShareLink, setPublicShareLink] = useState("");
+  const [publicShareLinksByResource, setPublicShareLinksByResource] = useState<Record<string, string>>({});
   const [creatingPublicShareLink, setCreatingPublicShareLink] = useState(false);
   const [shareRecipients, setShareRecipients] = useState<ShareRecipient[]>([]);
   const [shareRecipientsLoading, setShareRecipientsLoading] = useState(false);
@@ -1654,6 +1670,14 @@ export default function DashboardPage() {
   const [shareExamCanShare, setShareExamCanShare] = useState(false);
   const [showExamParticipantsModal, setShowExamParticipantsModal] = useState(false);
   const [examParticipantsTarget, setExamParticipantsTarget] = useState<ExamSummary | null>(null);
+  const [homeShareNotifications, setHomeShareNotifications] = useState<ShareNotificationItem[]>([]);
+  const [homeShareNotificationsLoading, setHomeShareNotificationsLoading] = useState(false);
+  const [claimedExamInvitePrompt, setClaimedExamInvitePrompt] = useState<{
+    examId: number;
+    examName: string;
+    message: string;
+    cachedExams: ExamSummary[];
+  } | null>(null);
   const [showRenameExamModal, setShowRenameExamModal] = useState(false);
   const [renameExamTarget, setRenameExamTarget] = useState<ExamSummary | null>(null);
   const [renameExamNameDraft, setRenameExamNameDraft] = useState("");
@@ -1661,6 +1685,11 @@ export default function DashboardPage() {
   const [examParticipantsLoading, setExamParticipantsLoading] = useState(false);
   const [examParticipants, setExamParticipants] = useState<ExamParticipant[]>([]);
   const [updatingExamParticipantUserId, setUpdatingExamParticipantUserId] = useState<number | null>(null);
+  const [removeExamParticipantPrompt, setRemoveExamParticipantPrompt] = useState<{
+    examId: number;
+    examName: string;
+    participant: ExamParticipant;
+  } | null>(null);
   const [notificationActionLoadingId, setNotificationActionLoadingId] = useState<number | null>(null);
   const [supportSelectedConversationId, setSupportSelectedConversationId] = useState<number | null>(null);
   const [supportMessages, setSupportMessages] = useState<SupportMessageItem[]>([]);
@@ -1690,6 +1719,7 @@ export default function DashboardPage() {
   const skipNextCourseHistoryPushRef = useRef(false);
   const syncingCourseHistoryPopRef = useRef(false);
   const groupPracticeRestoreTriedRef = useRef(false);
+  const shareRecipientsRequestVersionRef = useRef(0);
 
   useEffect(() => {
     const token = localStorage.getItem("smartlearn_token");
@@ -2065,6 +2095,92 @@ export default function DashboardPage() {
     setProfileImageDraftOffsetY(nextOffsetY);
   }, [user]);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    let cancelled = false;
+
+    const syncSessionProfile = async () => {
+      try {
+        const session = (await fetchJson("/api/v1/auth/session", user.token)) as Partial<SessionUser>;
+        if (cancelled || !session || typeof session !== "object") {
+          return;
+        }
+
+        const nextImageData =
+          typeof session.profileImageData === "string" && session.profileImageData.trim()
+            ? session.profileImageData.trim()
+            : null;
+        const sessionScale = Number(session.profileImageScale ?? 1);
+        const sessionOffsetX = Number(session.profileImageOffsetX ?? 0);
+        const normalizedScale = Number.isFinite(sessionScale) ? Math.min(3, Math.max(1, sessionScale)) : 1;
+        const normalizedOffsetX = Number.isFinite(sessionOffsetX) ? clampProfileImageOffsetX(sessionOffsetX, normalizedScale) : 0;
+        const nextScale = nextImageData == null ? 1 : normalizedScale;
+        const nextOffsetX = nextImageData == null ? 0 : normalizedOffsetX;
+        const nextOffsetY = 0;
+        const nextRoles = Array.isArray(session.roles)
+          ? session.roles.filter((role): role is string => typeof role === "string" && role.trim().length > 0)
+          : user.roles;
+
+        const nextUser: SessionUser = {
+          ...user,
+          name: typeof session.name === "string" && session.name.trim() ? session.name.trim() : user.name,
+          username: typeof session.username === "string" && session.username.trim() ? session.username.trim() : user.username,
+          email: typeof session.email === "string" && session.email.trim() ? session.email.trim() : user.email,
+          roles: nextRoles.length > 0 ? nextRoles : user.roles,
+          authProvider: typeof session.authProvider === "string" ? session.authProvider : user.authProvider,
+          hasLocalPassword:
+            typeof session.hasLocalPassword === "boolean" ? session.hasLocalPassword : user.hasLocalPassword,
+          profileImageData: nextImageData,
+          profileImageScale: nextScale,
+          profileImageOffsetX: nextOffsetX,
+          profileImageOffsetY: nextOffsetY,
+        };
+
+        const changed =
+          nextUser.name !== user.name ||
+          nextUser.username !== user.username ||
+          nextUser.email !== user.email ||
+          JSON.stringify(nextUser.roles) !== JSON.stringify(user.roles) ||
+          nextUser.authProvider !== user.authProvider ||
+          nextUser.hasLocalPassword !== user.hasLocalPassword ||
+          nextUser.profileImageData !== user.profileImageData ||
+          Number(nextUser.profileImageScale ?? 1) !== Number(user.profileImageScale ?? 1) ||
+          Number(nextUser.profileImageOffsetX ?? 0) !== Number(user.profileImageOffsetX ?? 0) ||
+          Number(nextUser.profileImageOffsetY ?? 0) !== Number(user.profileImageOffsetY ?? 0);
+
+        if (!changed) {
+          return;
+        }
+
+        setUser(nextUser);
+        localStorage.setItem("smartlearn_user", JSON.stringify(nextUser));
+        if (nextImageData == null) {
+          localStorage.removeItem(dashboardProfileImageKey(user.id));
+        } else {
+          localStorage.setItem(
+            dashboardProfileImageKey(user.id),
+            JSON.stringify({
+              imageData: nextImageData,
+              scale: nextScale,
+              offsetX: nextOffsetX,
+              offsetY: nextOffsetY,
+            }),
+          );
+        }
+      } catch {
+        // Best effort sync; keep local session snapshot when API sync fails.
+      }
+    };
+
+    void syncSessionProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id]);
+
   const isAdmin = useMemo(() => {
     if (!user) {
       return false;
@@ -2098,6 +2214,22 @@ export default function DashboardPage() {
   );
 
   const menu = isAdmin ? adminMenu : portalMenu;
+
+  const loadHomeShareNotifications = useCallback(async () => {
+    if (!user) {
+      return;
+    }
+    setHomeShareNotificationsLoading(true);
+    try {
+      const data = await fetchJson(`/api/v1/share-links/notifications?userId=${user.id}`, user.token);
+      const notifications = Array.isArray(data) ? data.filter((item) => isShareNotificationPayload(item)) : [];
+      setHomeShareNotifications(notifications);
+    } catch {
+      setHomeShareNotifications([]);
+    } finally {
+      setHomeShareNotificationsLoading(false);
+    }
+  }, [user]);
 
   useEffect(() => {
     const loadSection = async () => {
@@ -2184,6 +2316,21 @@ export default function DashboardPage() {
   }, [active, isAdmin, user]);
 
   useEffect(() => {
+    if (!user || active !== "inicio") {
+      return;
+    }
+
+    void loadHomeShareNotifications();
+    const intervalId = window.setInterval(() => {
+      void loadHomeShareNotifications();
+    }, 20 * 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [active, user, loadHomeShareNotifications]);
+
+  useEffect(() => {
     if (!user) {
       return;
     }
@@ -2262,9 +2409,14 @@ export default function DashboardPage() {
 
         if (result.resourceType === "exam") {
           const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
-          setPayload(exams);
-          setActive("examenes");
-          setExamFeedback(result.message?.trim() || "Examen compartido agregado a tu lista.", "success");
+          setClaimedExamInvitePrompt({
+            examId: result.resourceId,
+            examName: result.resourceName?.trim() || "Examen",
+            message: result.message?.trim() || "Examen compartido agregado a tu lista.",
+            cachedExams: exams,
+          });
+          setActive("inicio");
+          void loadHomeShareNotifications();
           return;
         }
 
@@ -2301,7 +2453,7 @@ export default function DashboardPage() {
     };
 
     void claimShareLink();
-  }, [shareTokenFromUrl, user]);
+  }, [shareTokenFromUrl, user, loadHomeShareNotifications]);
 
   const clearSessionStorage = useCallback((sessionUser: SessionUser | null) => {
     if (sessionUser) {
@@ -3826,6 +3978,12 @@ export default function DashboardPage() {
     setShowEditProfileImageModal(true);
   };
 
+  const onOpenProfileImageEditorFromSidebar = () => {
+    setActive(isAdmin ? "profile" : "perfil");
+    setUserMenuOpen(false);
+    onOpenProfileImageEditor();
+  };
+
   const onStartProfileImageDrag = (event: MouseEvent<HTMLDivElement>) => {
     if (event.button !== 0 || !profileImageDraftData || profileImageDraftScale <= 1) {
       return;
@@ -4236,30 +4394,54 @@ export default function DashboardPage() {
     setSalaFeedback(message, type);
   };
 
-  const loadShareRecipients = async () => {
+  const loadShareRecipients = useCallback(async (searchQuery: string) => {
     if (!user) {
       return;
     }
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      shareRecipientsRequestVersionRef.current += 1;
+      setShareRecipients([]);
+      setShareRecipientsLoading(false);
+      return;
+    }
+
+    const requestVersion = shareRecipientsRequestVersionRef.current + 1;
+    shareRecipientsRequestVersionRef.current = requestVersion;
     setShareRecipientsLoading(true);
     try {
-      const data = await fetchJson(`/api/v1/share-links/recipients?userId=${user.id}`, user.token);
+      const data = await fetchJson(
+        `/api/v1/share-links/recipients?userId=${user.id}&query=${encodeURIComponent(query)}&limit=25`,
+        user.token,
+      );
+      if (shareRecipientsRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       const recipients = Array.isArray(data) ? data.filter((item) => isShareRecipientPayload(item)) : [];
       setShareRecipients(recipients);
     } catch {
+      if (shareRecipientsRequestVersionRef.current !== requestVersion) {
+        return;
+      }
       setShareRecipients([]);
     } finally {
-      setShareRecipientsLoading(false);
+      if (shareRecipientsRequestVersionRef.current === requestVersion) {
+        setShareRecipientsLoading(false);
+      }
     }
-  };
+  }, [user]);
 
   const onOpenShareModal = (resourceType: ShareResourceType, resourceId: number, resourceName: string) => {
+    const resourceKey = `${resourceType}:${resourceId}`;
     setShareTarget({ resourceType, resourceId, resourceName });
-    setPublicShareLink("");
+    setPublicShareLink(publicShareLinksByResource[resourceKey] ?? "");
+    shareRecipientsRequestVersionRef.current += 1;
+    setShareRecipients([]);
+    setShareRecipientsLoading(false);
     setShareRecipientSearch("");
     setShareSelectedRecipientIds([]);
     setShareExamRole("viewer");
     setShareExamCanShare(false);
-    void loadShareRecipients();
 
     if (resourceType === "exam" && user) {
       setExamParticipantsLoading(true);
@@ -4285,11 +4467,35 @@ export default function DashboardPage() {
     }
     setShareTarget(null);
     setPublicShareLink("");
+    shareRecipientsRequestVersionRef.current += 1;
+    setShareRecipients([]);
+    setShareRecipientsLoading(false);
     setShareRecipientSearch("");
     setShareSelectedRecipientIds([]);
     setShareExamRole("viewer");
     setShareExamCanShare(false);
+    setRemoveExamParticipantPrompt(null);
   };
+
+  useEffect(() => {
+    if (!shareTarget) {
+      return;
+    }
+
+    const query = shareRecipientSearch.trim();
+    if (query.length < 2) {
+      shareRecipientsRequestVersionRef.current += 1;
+      setShareRecipients([]);
+      setShareRecipientsLoading(false);
+      return;
+    }
+
+    const handle = window.setTimeout(() => {
+      void loadShareRecipients(query);
+    }, 280);
+
+    return () => window.clearTimeout(handle);
+  }, [shareTarget, shareRecipientSearch, loadShareRecipients]);
 
   const buildShareAccessUrl = (token: string): string => {
     if (typeof window === "undefined") {
@@ -4312,7 +4518,7 @@ export default function DashboardPage() {
           : null;
 
       if (!endpoint) {
-        setShareFeedback(shareTarget.resourceType, "Recurso no soportado para compartir enlace público.", "error");
+        setShareFeedback(shareTarget.resourceType, "Recurso no soportado para compartir enlace pÃºblico.", "error");
         return;
       }
 
@@ -4322,13 +4528,18 @@ export default function DashboardPage() {
       })) as { token: string };
 
       const generatedUrl = buildShareAccessUrl(result.token);
+      const shareKey = `${shareTarget.resourceType}:${shareTarget.resourceId}`;
       setPublicShareLink(generatedUrl);
-      setShareFeedback(shareTarget.resourceType, "Enlace público creado exitosamente.", "success");
+      setPublicShareLinksByResource((current) => ({
+        ...current,
+        [shareKey]: generatedUrl,
+      }));
+      setShareFeedback(shareTarget.resourceType, "Enlace publico listo para copiar.", "success");
     } catch (error) {
        if (error instanceof Error) {
          setShareFeedback(shareTarget.resourceType, error.message, "error");
        } else {
-         setShareFeedback(shareTarget.resourceType, "Error al generar el enlace público.", "error");
+         setShareFeedback(shareTarget.resourceType, "Error al generar el enlace pÃºblico.", "error");
        }
     } finally {
       setCreatingPublicShareLink(false);
@@ -4363,6 +4574,18 @@ export default function DashboardPage() {
         examCanShare: shareTarget.resourceType === "exam" ? shareExamCanShare : undefined,
       })) as ShareDistributeResponse;
 
+      if (shareTarget.resourceType === "exam") {
+        const participantsData = await fetchJson(
+          `/api/v1/ia/exams/${shareTarget.resourceId}/participants?userId=${user.id}`,
+          user.token,
+        );
+        const participants = Array.isArray(participantsData)
+          ? participantsData.filter((item) => isExamParticipantPayload(item))
+          : [];
+        setExamParticipants(participants);
+      }
+
+      setShareSelectedRecipientIds([]);
       setShareFeedback(
         shareTarget.resourceType,
         `Notificaciones de invitacion enviadas internamente a ${result.notificationsCreated ?? shareSelectedRecipientIds.length} usuario(s).`,
@@ -4471,6 +4694,73 @@ export default function DashboardPage() {
     }
   };
 
+  const onRemoveExamParticipant = async (examId: number, participant: ExamParticipant) => {
+    if (!user) {
+      return;
+    }
+    if (participant.owner || participant.role === "owner") {
+      return;
+    }
+    setUpdatingExamParticipantUserId(participant.userId);
+    try {
+      await deleteJson(`/api/v1/ia/exams/${examId}/participants/${participant.userId}?requesterUserId=${user.id}`, user.token);
+      setExamParticipants((current) => current.filter((item) => item.userId !== participant.userId));
+      setShareSelectedRecipientIds((current) => current.filter((id) => id !== participant.userId));
+      await refreshExams();
+      setExamFeedback("Participante eliminado del examen.", "success");
+    } catch (removeError) {
+      if (removeError instanceof Error) {
+        setExamFeedback(removeError.message, "error");
+      } else {
+        setExamFeedback("No se pudo eliminar al participante del examen.", "error");
+      }
+    } finally {
+      setUpdatingExamParticipantUserId(null);
+    }
+  };
+
+  const onRequestRemoveExamParticipant = (
+    examId: number,
+    participant: ExamParticipant,
+    examName: string,
+  ) => {
+    if (participant.owner || participant.role === "owner") {
+      return;
+    }
+    setRemoveExamParticipantPrompt({
+      examId,
+      examName: examName.trim() || "este examen",
+      participant,
+    });
+  };
+
+  const onCancelRemoveExamParticipant = () => {
+    if (updatingExamParticipantUserId != null) {
+      return;
+    }
+    setRemoveExamParticipantPrompt(null);
+  };
+
+  const onConfirmRemoveExamParticipant = async () => {
+    if (!removeExamParticipantPrompt) {
+      return;
+    }
+    const target = removeExamParticipantPrompt;
+    await onRemoveExamParticipant(target.examId, target.participant);
+    setRemoveExamParticipantPrompt(null);
+  };
+
+  const syncUpdatedNotification = (updated: ShareNotificationItem) => {
+    setPayload((current: unknown) =>
+      Array.isArray(current)
+        ? current.map((item) =>
+            isShareNotificationPayload(item) && item.id === updated.id ? { ...item, ...updated } : item,
+          )
+        : current,
+    );
+    setHomeShareNotifications((current) => current.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+  };
+
   const onMarkNotificationAsRead = async (notification: ShareNotificationItem) => {
     if (!user || notificationActionLoadingId != null) {
       return;
@@ -4482,13 +4772,7 @@ export default function DashboardPage() {
         user.token,
         {},
       )) as ShareNotificationItem;
-      setPayload((current: unknown) =>
-        Array.isArray(current)
-          ? current.map((item) =>
-              isShareNotificationPayload(item) && item.id === notification.id ? { ...item, readAt: updated.readAt } : item,
-            )
-          : current,
-      );
+      syncUpdatedNotification(updated);
     } catch {
       setError("No se pudo marcar la notificacion como leida.");
     } finally {
@@ -4496,7 +4780,95 @@ export default function DashboardPage() {
     }
   };
 
+  const onAcceptNotificationInvitation = async (notification: ShareNotificationItem) => {
+    if (!user || notificationActionLoadingId != null) {
+      return;
+    }
+    if (normalizeInvitationStatus(notification.invitationStatus) !== "pending") {
+      return;
+    }
+    setNotificationActionLoadingId(notification.id);
+    try {
+      const updated = (await patchJson(
+        `/api/v1/share-links/notifications/${notification.id}/accept?userId=${user.id}`,
+        user.token,
+        {},
+      )) as ShareNotificationItem;
+      syncUpdatedNotification(updated);
+
+      const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+      const examName = updated.resourceName?.trim() || notification.resourceName?.trim() || "Examen";
+      setClaimedExamInvitePrompt({
+        examId: updated.resourceId ?? notification.resourceId,
+        examName,
+        message: `Invitacion aceptada. ${examName} ya esta disponible en tu lista de examenes.`,
+        cachedExams: exams,
+      });
+      setActive("inicio");
+    } catch (acceptError) {
+      if (acceptError instanceof Error) {
+        setError(acceptError.message);
+      } else {
+        setError("No se pudo aceptar la invitacion.");
+      }
+    } finally {
+      setNotificationActionLoadingId(null);
+    }
+  };
+
+  const onRejectNotificationInvitation = async (notification: ShareNotificationItem) => {
+    if (!user || notificationActionLoadingId != null) {
+      return;
+    }
+    if (normalizeInvitationStatus(notification.invitationStatus) !== "pending") {
+      return;
+    }
+    setNotificationActionLoadingId(notification.id);
+    try {
+      const updated = (await patchJson(
+        `/api/v1/share-links/notifications/${notification.id}/reject?userId=${user.id}`,
+        user.token,
+        {},
+      )) as ShareNotificationItem;
+      syncUpdatedNotification(updated);
+    } catch (rejectError) {
+      if (rejectError instanceof Error) {
+        setError(rejectError.message);
+      } else {
+        setError("No se pudo rechazar la invitacion.");
+      }
+    } finally {
+      setNotificationActionLoadingId(null);
+    }
+  };
+
   const onOpenNotificationResource = async (notification: ShareNotificationItem) => {
+    if (!user) {
+      return;
+    }
+    const resourceType = (notification.resourceType ?? "").trim().toLowerCase();
+    if (resourceType === "exam") {
+      const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
+      if (invitationStatus === "pending") {
+        setError("Primero acepta o rechaza la invitacion del examen.");
+        return;
+      }
+      if (invitationStatus === "rejected") {
+        setError("Esta invitacion fue rechazada.");
+        return;
+      }
+      try {
+        const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+        setPayload(exams);
+        setActive("examenes");
+        const examName = notification.resourceName?.trim() || "Examen";
+        setExamFeedback(`${examName} disponible en tu lista de examenes.`, "success");
+      } catch {
+        setError("No se pudo abrir el examen invitado.");
+      }
+      return;
+    }
+
     if (!notification.token || !notification.token.trim()) {
       setError("La notificacion no tiene un enlace valido.");
       return;
@@ -4505,6 +4877,26 @@ export default function DashboardPage() {
       await onMarkNotificationAsRead(notification);
     }
     router.push(`/dashboard?share=${encodeURIComponent(notification.token.trim())}`);
+  };
+
+  const onGoToClaimedExam = async () => {
+    if (!user || !claimedExamInvitePrompt) {
+      return;
+    }
+    const nextExams =
+      claimedExamInvitePrompt.cachedExams.length > 0
+        ? claimedExamInvitePrompt.cachedExams
+        : ((await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[]);
+    setPayload(nextExams);
+    setActive("examenes");
+    setExamFeedback(claimedExamInvitePrompt.message, "success");
+    setClaimedExamInvitePrompt(null);
+  };
+
+  const onStayOnHomeAfterClaim = () => {
+    setActive("inicio");
+    setClaimedExamInvitePrompt(null);
+    void loadHomeShareNotifications();
   };
 
   const onCreateSupportConversation = async (event: FormEvent<HTMLFormElement>) => {
@@ -5867,9 +6259,9 @@ export default function DashboardPage() {
             "error",
           );
         } else if (rawMessage.toLowerCase().includes("no hay repaso grupal creado")) {
-          // BUGFIX: Si el usuario dueño hace click en "Regresar al repaso" luego de 20s de inactividad,
-          // el backend mata la sesión por timeout y devuelve este error. Si el usuario es quien puede iniciar grupos,
-          // re-creamos la sesión automáticamente.
+          // BUGFIX: Si el usuario dueÃ±o hace click en "Regresar al repaso" luego de 20s de inactividad,
+          // el backend mata la sesiÃ³n por timeout y devuelve este error. Si el usuario es quien puede iniciar grupos,
+          // re-creamos la sesiÃ³n automÃ¡ticamente.
           const isCreator =
             exam.groupPracticeCreatedByUserId === user.id ||
             exam.accessRole === "owner" ||
@@ -6348,6 +6740,8 @@ export default function DashboardPage() {
     if (user) {
       window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
     }
+    setShowGroupRoomClosedModal(false);
+    setGroupRoomClosedKeepViewing(false);
     setShowGroupPracticeRunnerModal(false);
     setGroupPracticeState(null);
     setGroupAnswersByQuestionKey({});
@@ -6361,6 +6755,19 @@ export default function DashboardPage() {
     groupQuestionRuntimeKeyRef.current = null;
     resetPracticeInputState();
     setActive(practiceOriginSection === "ia" ? "ia" : practiceOriginSection === "cursos" ? "cursos" : "examenes");
+  };
+
+  const onKeepViewingClosedGroupRoomResult = () => {
+    setShowGroupRoomClosedModal(false);
+    setGroupRoomClosedKeepViewing(true);
+    setExamFeedback("La sala fue cerrada por el anfitrion. Puedes seguir viendo el resultado final.", "info");
+  };
+
+  const onGoToExamsAfterGroupRoomClosed = () => {
+    setShowGroupRoomClosedModal(false);
+    setGroupRoomClosedKeepViewing(false);
+    onCloseGroupPracticeRunner();
+    setActive("examenes");
   };
 
   const onCloseGroupWaitingRoom = async () => {
@@ -6391,7 +6798,14 @@ export default function DashboardPage() {
 
 
   useEffect(() => {
-    if (!showGroupPracticeRunnerModal || !user || !selectedExam || !groupPracticeState) {
+    if (
+      !showGroupPracticeRunnerModal ||
+      !user ||
+      !selectedExam ||
+      !groupPracticeState ||
+      showGroupRoomClosedModal ||
+      groupRoomClosedKeepViewing
+    ) {
       return;
     }
     const sessionId = groupPracticeState.sessionId;
@@ -6427,8 +6841,8 @@ export default function DashboardPage() {
             }
           }
         } catch {
-          // Si el backend rechaza el sessionId (sesión cerrada/reiniciada por admin),
-          // hacer un join para obtener la sesión activa más reciente y redirigir
+          // Si el backend rechaza el sessionId (sesiÃ³n cerrada/reiniciada por admin),
+          // hacer un join para obtener la sesiÃ³n activa mÃ¡s reciente y redirigir
           try {
             const latestState = (await postJson(
               `/api/v1/ia/exams/${examId}/practice/group/join`,
@@ -6436,7 +6850,7 @@ export default function DashboardPage() {
               { userId: user.id },
             )) as ExamGroupState;
             if (latestState && latestState.sessionId !== sessionId) {
-              // Nueva sesión detectada: redirigir al usuario a la sala de espera
+              // Nueva sesiÃ³n detectada: redirigir al usuario a la sala de espera
               setGroupPracticeState((previous) => mergeGroupState(previous, latestState));
               setGroupTimerExpired(false);
               resetPracticeInputState();
@@ -6444,22 +6858,28 @@ export default function DashboardPage() {
               setPracticeFeedbackStatus(null);
             }
           } catch {
-            setShowGroupPracticeRunnerModal(false);
-            setGroupPracticeState(null);
-            setGroupAnswersByQuestionKey({});
-            setGroupRoomClosedMessage("La sala fue cerrada por el anfitrion.");
+            setGroupRoomClosedMessage(
+              "La sala de espera fue cerrada por el anfitrion. Deseas quedarte viendo el resultado final o volver al modulo de examenes?",
+            );
             setShowGroupRoomClosedModal(true);
+            setGroupRoomClosedKeepViewing(false);
             if (user) {
               window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
             }
-            setActive("examenes");
           }
         }
       })();
     }, 1000);
 
     return () => window.clearInterval(pollHandle);
-  }, [showGroupPracticeRunnerModal, user, selectedExam, groupPracticeState?.sessionId]);
+  }, [
+    showGroupPracticeRunnerModal,
+    showGroupRoomClosedModal,
+    groupRoomClosedKeepViewing,
+    user,
+    selectedExam,
+    groupPracticeState?.sessionId,
+  ]);
 
   useEffect(() => {
     if (!showGroupPracticeRunnerModal || !groupPracticeState) {
@@ -6613,7 +7033,7 @@ export default function DashboardPage() {
       return;
     }
 
-    // Marcar cronómetro como expirado para mostrar resultados
+    // Marcar cronÃ³metro como expirado para mostrar resultados
     setGroupTimerExpired(true);
     setGroupTimerExpiredQuestionKey(questionKey);
 
@@ -6722,12 +7142,12 @@ export default function DashboardPage() {
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, freshState));
         } catch {
-          // silencio: el polling principal seguirá intentando.
+          // silencio: el polling principal seguirÃ¡ intentando.
         }
       })();
     };
 
-    // Forzar un refresh inmediato al entrar a revisión para no mostrar snapshots viejos.
+    // Forzar un refresh inmediato al entrar a revisiÃ³n para no mostrar snapshots viejos.
     if (isNewReviewWindow) {
       refreshReviewState();
     }
@@ -7997,25 +8417,141 @@ export default function DashboardPage() {
     }
 
     if (active === "inicio") {
+      const unreadCount = homeShareNotifications.reduce(
+        (count, notification) => (!notification.readAt ? count + 1 : count),
+        0,
+      );
       return (
-        <div className="grid gap-4 md:grid-cols-2">
-          <DataCard title="Panel de bienvenida">
-            <p className="text-sm text-slate-700">
-              Bienvenido {user.name}. Desde aqui puedes acceder a IA, examenes, salas y horarios.
-            </p>
-          </DataCard>
-          <DataCard title="Accesos rapidos">
-            <div className="grid grid-cols-2 gap-2">
-              {["IA", "Examenes", "Salas", "Horarios"].map((item) => (
+        <div className="grid gap-4 xl:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-2 xl:col-span-2">
+            <DataCard title="Panel de bienvenida">
+              <p className="text-sm text-slate-700">
+                Bienvenido {user.name}. Desde aqui puedes acceder a IA, examenes, salas y horarios.
+              </p>
+            </DataCard>
+            <DataCard title="Accesos rapidos">
+              <div className="grid grid-cols-2 gap-2">
+                {["IA", "Examenes", "Salas", "Horarios"].map((item) => (
+                  <button
+                    key={item}
+                    type="button"
+                    onClick={() => setActive(item.toLowerCase())}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                  >
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </DataCard>
+          </div>
+          <DataCard title={`Notificaciones${unreadCount > 0 ? ` (${unreadCount} nuevas)` : ""}`}>
+            <div className="space-y-2">
+              <p className="text-xs text-slate-600">
+                Aqui llegan tus invitaciones. Puedes aceptarlas sin salir de Inicio.
+              </p>
+              <div className="max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                {homeShareNotificationsLoading ? (
+                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                    Cargando notificaciones...
+                  </article>
+                ) : homeShareNotifications.length === 0 ? (
+                  <article className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                    No tienes invitaciones por ahora.
+                  </article>
+                ) : (
+                  homeShareNotifications.map((notification) => {
+                    const resourceTypeText =
+                      notification.resourceType === "exam"
+                        ? "Examen"
+                        : notification.resourceType === "course"
+                          ? "Curso"
+                          : notification.resourceType === "sala"
+                            ? "Sala"
+                            : "Recurso";
+                    const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
+                    const isPendingExamInvite =
+                      notification.resourceType === "exam" && invitationStatus === "pending";
+                    const isRejectedExamInvite =
+                      notification.resourceType === "exam" && invitationStatus === "rejected";
+                    const shareUrl =
+                      notification.token && notification.token.trim()
+                        ? buildShareAccessUrl(notification.token.trim())
+                        : "";
+                    const isRead = !!notification.readAt;
+                    const canOpenResource =
+                      notification.resourceType === "exam" ? invitationStatus === "accepted" : !!shareUrl;
+                    return (
+                      <article
+                        key={notification.id}
+                        className={`rounded-xl border p-3 ${
+                          isRead ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"
+                        }`}
+                      >
+                        <p className="text-sm font-semibold text-slate-800">
+                          {resourceTypeText}: {notification.resourceName?.trim() || "Sin nombre"}
+                        </p>
+                        <p className="mt-1 text-xs text-slate-600">
+                          {notification.message?.trim() || "Recibiste una invitacion compartida."}
+                        </p>
+                        {isRejectedExamInvite ? (
+                          <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-rose-600">
+                            Invitacion rechazada
+                          </p>
+                        ) : null}
+                        <div className="mt-2 flex flex-wrap justify-end gap-2">
+                          {isPendingExamInvite ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={notificationActionLoadingId === notification.id}
+                                onClick={() => void onRejectNotificationInvitation(notification)}
+                                className="rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {notificationActionLoadingId === notification.id ? "Procesando..." : "Rechazar"}
+                              </button>
+                              <button
+                                type="button"
+                                disabled={notificationActionLoadingId === notification.id}
+                                onClick={() => void onAcceptNotificationInvitation(notification)}
+                                className="rounded-lg bg-[#004aad] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#003b88] disabled:cursor-not-allowed disabled:opacity-60"
+                              >
+                                {notificationActionLoadingId === notification.id ? "Aceptando..." : "Aceptar"}
+                              </button>
+                            </>
+                          ) : canOpenResource ? (
+                            <button
+                              type="button"
+                              onClick={() => void onOpenNotificationResource(notification)}
+                              className="rounded-lg bg-[#004aad] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#003b88]"
+                            >
+                              {notification.resourceType === "exam" ? "Ver examen" : "Abrir"}
+                            </button>
+                          ) : null}
+                          {!isRead ? (
+                            <button
+                              type="button"
+                              disabled={notificationActionLoadingId === notification.id}
+                              onClick={() => void onMarkNotificationAsRead(notification)}
+                              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {notificationActionLoadingId === notification.id ? "Marcando..." : "Marcar leida"}
+                            </button>
+                          ) : null}
+                        </div>
+                      </article>
+                    );
+                  })
+                )}
+              </div>
+              <div className="flex justify-end">
                 <button
-                  key={item}
                   type="button"
-                  onClick={() => setActive(item.toLowerCase())}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                  onClick={() => setActive("notificaciones")}
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
                 >
-                  {item}
+                  Ver bandeja completa
                 </button>
-              ))}
+              </div>
             </div>
           </DataCard>
         </div>
@@ -10113,6 +10649,30 @@ export default function DashboardPage() {
           : null;
         const canStartGroup = Boolean(groupPracticeState.canStartGroup);
         const waitingParticipants = groupPracticeState.participants;
+        const toNumericScore = (value: number | null | undefined): number => {
+          const normalized = Number(value ?? 0);
+          return Number.isFinite(normalized) ? normalized : 0;
+        };
+        const finalRanking = (groupPracticeState.finalRanking ?? [])
+          .slice()
+          .sort((a, b) => {
+            const byFinalScore = toNumericScore(b.finalScore) - toNumericScore(a.finalScore);
+            if (byFinalScore !== 0) {
+              return byFinalScore;
+            }
+
+            const byBaseScore = toNumericScore(b.baseScore) - toNumericScore(a.baseScore);
+            if (byBaseScore !== 0) {
+              return byBaseScore;
+            }
+
+            const byCorrectCount = toNumericScore(b.correctCount) - toNumericScore(a.correctCount);
+            if (byCorrectCount !== 0) {
+              return byCorrectCount;
+            }
+
+            return toNumericScore(a.rank) - toNumericScore(b.rank);
+          });
         const isReviewWindow = groupAutoAdvanceSecondsLeft != null;
         const normalizeReviewToken = (value: string | null | undefined): string =>
           (value ?? "")
@@ -10239,7 +10799,7 @@ export default function DashboardPage() {
                 <div className="space-y-3">
                   {groupPracticeState.status === "waiting" ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-sm text-slate-700">Sala grupal en espera. Cuando estén listos, inicia el repaso.</p>
+                      <p className="text-sm text-slate-700">Sala grupal en espera. Cuando estÃ©n listos, inicia el repaso.</p>
                       <div className="mt-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <button
@@ -10643,60 +11203,86 @@ export default function DashboardPage() {
                         )}
                       </div>
 
-                      {(groupPracticeState.finalRanking ?? []).length > 0 ? (
+                      {finalRanking.length > 0 ? (
                         <div className="space-y-2">
                           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Ranking final</p>
-                          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                            {(groupPracticeState.finalRanking ?? []).map((entry) => {
-                              const fullName = (entry.name ?? "Usuario").trim() || "Usuario";
-                              const username = (entry.username ?? "").trim();
-                              const initials = fullName
-                                .split(" ")
-                                .filter(Boolean)
-                                .slice(0, 2)
-                                .map((part) => part[0]?.toUpperCase() ?? "")
-                                .join("");
+                          <div className="overflow-x-auto rounded-lg border border-emerald-200 bg-white shadow-sm">
+                            <table className="min-w-[780px] w-full text-left text-xs text-slate-700 sm:text-sm">
+                              <thead className="bg-emerald-100 text-[11px] uppercase tracking-wide text-emerald-800 sm:text-xs">
+                                <tr>
+                                  <th className="px-3 py-2 font-semibold">Puesto</th>
+                                  <th className="px-3 py-2 font-semibold">Usuario</th>
+                                  <th className="px-3 py-2 font-semibold">Bien</th>
+                                  <th className="px-3 py-2 font-semibold">Mal</th>
+                                  <th className="px-3 py-2 font-semibold">Base</th>
+                                  <th className="px-3 py-2 font-semibold">Rapidez</th>
+                                  <th className="px-3 py-2 font-semibold">Nota final</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {finalRanking.map((entry, index) => {
+                                  const fullName = (entry.name ?? "Usuario").trim() || "Usuario";
+                                  const username = (entry.username ?? "").trim();
+                                  const initials = fullName
+                                    .split(" ")
+                                    .filter(Boolean)
+                                    .slice(0, 2)
+                                    .map((part) => part[0]?.toUpperCase() ?? "")
+                                    .join("");
+                                  const displayRank = index + 1;
 
-                              return (
-                                <article key={`final-ranking-${entry.userId}-${entry.rank}`} className="rounded-lg border border-emerald-200 bg-white p-3 text-slate-800 shadow-sm">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-2 min-w-0">
-                                      <span className="inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-full border border-slate-300 bg-slate-200 text-[11px] font-bold text-slate-700">
-                                        {entry.profileImageUrl ? (
-                                          <img src={entry.profileImageUrl} alt={fullName} className="h-full w-full object-cover" />
-                                        ) : (
-                                          initials || "?"
-                                        )}
-                                      </span>
-                                      <div className="min-w-0">
-                                        <p className="truncate text-sm font-semibold text-slate-900">{fullName}</p>
-                                        <p className="truncate text-xs text-slate-600">@{username || "usuario"}</p>
-                                      </div>
-                                    </div>
-                                    <span className="rounded-full bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">#{entry.rank}</span>
-                                  </div>
-
-                                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                                    <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-emerald-700">
-                                      Bien: {Number(entry.correctCount ?? 0)}
-                                    </div>
-                                    <div className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-rose-700">
-                                      Mal: {Number(entry.wrongCount ?? 0)}
-                                    </div>
-                                    <div className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1 text-slate-700">
-                                      Base: {Number(entry.baseScore ?? 0)}
-                                    </div>
-                                    <div className="rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 text-indigo-700">
-                                      Rapidez: +{Number(entry.speedBonus ?? 0)}
-                                    </div>
-                                  </div>
-
-                                  <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm font-bold text-slate-900">
-                                    Nota final: {Number(entry.finalScore ?? 0)}
-                                  </div>
-                                </article>
-                              );
-                            })}
+                                  return (
+                                    <tr key={`final-ranking-row-${entry.userId}`} className="border-t border-slate-200">
+                                      <td className="px-3 py-2 align-middle">
+                                        <span className="inline-flex rounded-full bg-emerald-600 px-2 py-1 text-xs font-semibold text-white">
+                                          #{displayRank}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 align-middle">
+                                        <div className="flex min-w-0 items-center gap-2">
+                                          <span className="inline-flex h-8 w-8 items-center justify-center overflow-hidden rounded-full border border-slate-300 bg-slate-200 text-[10px] font-bold text-slate-700">
+                                            {entry.profileImageUrl ? (
+                                              <img src={entry.profileImageUrl} alt={fullName} className="h-full w-full object-cover" />
+                                            ) : (
+                                              initials || "?"
+                                            )}
+                                          </span>
+                                          <div className="min-w-0">
+                                            <p className="truncate font-semibold text-slate-900">{fullName}</p>
+                                            <p className="truncate text-xs text-slate-600">@{username || "usuario"}</p>
+                                          </div>
+                                        </div>
+                                      </td>
+                                      <td className="px-3 py-2 align-middle">
+                                        <span className="inline-flex rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-medium text-emerald-700">
+                                          {toNumericScore(entry.correctCount)}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 align-middle">
+                                        <span className="inline-flex rounded-md border border-rose-200 bg-rose-50 px-2 py-1 font-medium text-rose-700">
+                                          {toNumericScore(entry.wrongCount)}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 align-middle">
+                                        <span className="inline-flex rounded-md border border-slate-200 bg-slate-50 px-2 py-1 font-medium text-slate-700">
+                                          {toNumericScore(entry.baseScore)}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 align-middle">
+                                        <span className="inline-flex rounded-md border border-indigo-200 bg-indigo-50 px-2 py-1 font-medium text-indigo-700">
+                                          +{toNumericScore(entry.speedBonus)}
+                                        </span>
+                                      </td>
+                                      <td className="px-3 py-2 align-middle">
+                                        <span className="inline-flex rounded-md border border-slate-300 bg-slate-100 px-2 py-1 text-sm font-bold text-slate-900">
+                                          {toNumericScore(entry.finalScore)}
+                                        </span>
+                                      </td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
                           </div>
                         </div>
                       ) : null}
@@ -13630,10 +14216,19 @@ export default function DashboardPage() {
                 notifications.map((notification) => {
                   const createdAtText = formatExamCreatedAt(notification.createdAt, undefined);
                   const isRead = !!notification.readAt;
+                  const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
+                  const isPendingExamInvite =
+                    notification.resourceType === "exam" && invitationStatus === "pending";
+                  const isAcceptedExamInvite =
+                    notification.resourceType === "exam" && invitationStatus === "accepted";
+                  const isRejectedExamInvite =
+                    notification.resourceType === "exam" && invitationStatus === "rejected";
                   const shareUrl =
                     notification.token && notification.token.trim()
                       ? buildShareAccessUrl(notification.token.trim())
                       : "";
+                  const canOpenResource =
+                    notification.resourceType === "exam" ? invitationStatus === "accepted" : !!shareUrl;
                   const resourceTypeText =
                     notification.resourceType === "exam"
                       ? "Examen"
@@ -13661,6 +14256,19 @@ export default function DashboardPage() {
                           >
                             {isRead ? "Leida" : "Nueva"}
                           </span>
+                          {notification.resourceType === "exam" ? (
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                isPendingExamInvite
+                                  ? "bg-amber-100 text-amber-700"
+                                  : isRejectedExamInvite
+                                    ? "bg-rose-100 text-rose-700"
+                                    : "bg-emerald-100 text-emerald-700"
+                              }`}
+                            >
+                              {isPendingExamInvite ? "Pendiente" : isRejectedExamInvite ? "Rechazada" : "Aceptada"}
+                            </span>
+                          ) : null}
                           <span className="text-xs text-slate-500">{createdAtText}</span>
                         </div>
                       </div>
@@ -13674,16 +14282,35 @@ export default function DashboardPage() {
                       </p>
 
                       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                        {shareUrl ? (
+                        {isPendingExamInvite ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={notificationActionLoadingId === notification.id}
+                              onClick={() => void onRejectNotificationInvitation(notification)}
+                              className="rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                            >
+                              {notificationActionLoadingId === notification.id ? "Procesando..." : "Rechazar"}
+                            </button>
+                            <button
+                              type="button"
+                              disabled={notificationActionLoadingId === notification.id}
+                              onClick={() => void onAcceptNotificationInvitation(notification)}
+                              className="rounded-lg bg-[#004aad] px-3 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-60"
+                            >
+                              {notificationActionLoadingId === notification.id ? "Aceptando..." : "Aceptar"}
+                            </button>
+                          </>
+                        ) : canOpenResource ? (
                           <button
                             type="button"
                             onClick={() => void onOpenNotificationResource(notification)}
                             className="rounded-lg bg-[#004aad] px-3 py-2 text-sm font-semibold text-white hover:bg-[#003b88]"
                           >
-                            Abrir
+                            {isAcceptedExamInvite ? "Ver examen" : "Abrir"}
                           </button>
                         ) : null}
-                        {shareUrl ? (
+                        {notification.resourceType !== "exam" && shareUrl ? (
                           <button
                             type="button"
                             onClick={async () => {
@@ -14901,7 +15528,12 @@ export default function DashboardPage() {
         {sidebarOpen ? (
           <aside className="w-[260px] min-w-[260px] border-r border-white/10 bg-[#1f242c] p-3 text-slate-100">
             <div className="px-2 py-2 text-center">
-              <div className="relative mx-auto mb-2 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full bg-slate-400/40 text-2xl font-bold">
+              <button
+                type="button"
+                onClick={onOpenProfileImageEditorFromSidebar}
+                title="Editar foto de perfil"
+                className="group relative mx-auto mb-2 flex h-20 w-20 items-center justify-center overflow-hidden rounded-full border border-white/25 bg-slate-400/40 text-2xl font-bold transition hover:border-white/60 hover:ring-2 hover:ring-white/20"
+              >
                 {profileImageData ? (
                   <img
                     src={profileImageData}
@@ -14912,7 +15544,7 @@ export default function DashboardPage() {
                 ) : (
                   user.name.slice(0, 1).toUpperCase()
                 )}
-              </div>
+              </button>
               <p className="text-sm font-bold uppercase">{user.name}</p>
               <p className="text-xs uppercase text-slate-300">{isAdmin ? "admin" : "user"}</p>
             </div>
@@ -14960,7 +15592,7 @@ export default function DashboardPage() {
                 </svg>
               </button>
 
-              <Image src="/a21k.png" alt="SmartLearn" width={120} height={32} />
+              <Image src="/smartlearn.png" alt="SmartLearn" width={120} height={32} />
               <span className="text-sm font-semibold uppercase tracking-wide">{active || "panel"}</span>
             </div>
 
@@ -14970,6 +15602,20 @@ export default function DashboardPage() {
                 onClick={() => setUserMenuOpen((value) => !value)}
                 className="inline-flex items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold uppercase tracking-wide text-white hover:bg-white/20"
               >
+                <span className="relative h-7 w-7 overflow-hidden rounded-full border border-white/25 bg-white/20 text-xs font-bold text-white">
+                  {profileImageData ? (
+                    <img
+                      src={profileImageData}
+                      alt="Mi foto"
+                      className="absolute inset-0 h-full w-full object-cover"
+                      style={profileImagePreviewStyle}
+                    />
+                  ) : (
+                    <span className="flex h-full w-full items-center justify-center">
+                      {user.name.slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </span>
                 {user.username}
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -14985,6 +15631,24 @@ export default function DashboardPage() {
 
               {userMenuOpen ? (
                 <div className="absolute right-0 top-11 z-30 w-48 rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={onOpenProfileImageEditorFromSidebar}
+                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="h-4 w-4"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h6" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 4.5a2.1 2.1 0 1 1 3 3L8 17l-4 1 1-4 9.5-9.5Z" />
+                    </svg>
+                    Foto de perfil
+                  </button>
                   <button
                     type="button"
                     onClick={() => {
@@ -15080,7 +15744,7 @@ export default function DashboardPage() {
                   Recurso: <span className="font-semibold">{shareTarget.resourceName}</span>
                 </p>
 
-                {/* --- 1. ENLACE PÚBLICO --- */}
+                {/* --- 1. ENLACE PÃšBLICO --- */}
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
                   <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-700">
                     <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -15168,7 +15832,7 @@ export default function DashboardPage() {
                         <>
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                              Selecciona o busca usuarios
+                              Buscar usuarios
                             </label>
                             <span className="text-xs text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                               Seleccionados: <span className="font-bold text-blue-600">{validSelectedIds.length}</span>
@@ -15181,16 +15845,17 @@ export default function DashboardPage() {
                       placeholder="Buscar por nombre, usuario o correo..."
                       className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-900 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all"
                     />
+                    <p className="text-[11px] text-slate-500">Escribe al menos 2 caracteres para buscar usuarios.</p>
 
                     {shareRecipientsLoading ? (
-                      <p className="text-sm text-slate-500 italic py-2">Cargando usuarios del sistema...</p>
+                      <p className="text-sm text-slate-500 italic py-2">Buscando usuarios...</p>
                     ) : (
                       <div className="max-h-36 space-y-1.5 overflow-y-auto pr-1">
                         {shareRecipients
                           .filter((recipient) => {
                             const query = shareRecipientSearch.trim().toLowerCase();
-                            if (!query) {
-                              return true;
+                            if (query.length < 2) {
+                              return false;
                             }
                             return `${recipient.name} ${recipient.username} ${recipient.email}`
                               .toLowerCase()
@@ -15210,7 +15875,9 @@ export default function DashboardPage() {
                                 >
                                   <input
                                     type="checkbox"
+                                    checked={false}
                                     disabled
+                                    readOnly
                                     className="h-4 w-4 text-slate-400 rounded border-slate-300"
                                   />
                                   <div className="min-w-0 flex-1">
@@ -15233,7 +15900,7 @@ export default function DashboardPage() {
                               >
                                 <input
                                   type="checkbox"
-                                  checked={selected}
+                                  checked={Boolean(selected)}
                                   className="h-4 w-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
                                   onChange={(event) => {
                                     setShareSelectedRecipientIds((current) => {
@@ -15255,14 +15922,18 @@ export default function DashboardPage() {
                           })}
                         {shareRecipients.filter((recipient) => {
                           const query = shareRecipientSearch.trim().toLowerCase();
-                          if (!query) {
-                            return true;
+                          if (query.length < 2) {
+                            return false;
                           }
                           return `${recipient.name} ${recipient.username} ${recipient.email}`
                             .toLowerCase()
                             .includes(query);
                         }).length === 0 ? (
-                          <p className="text-sm text-slate-400 py-2 text-center">No se encontraron usuarios coincidentes.</p>
+                          <p className="text-sm text-slate-400 py-2 text-center">
+                            {shareRecipientSearch.trim().length < 2
+                              ? "Escribe al menos 2 caracteres para buscar."
+                              : "No se encontraron usuarios coincidentes."}
+                          </p>
                         ) : null}
                       </div>
                     )}
@@ -15296,14 +15967,39 @@ export default function DashboardPage() {
                       {examParticipantsLoading ? (
                         <p className="text-xs text-slate-500 py-1 text-center italic">Cargando participantes...</p>
                       ) : examParticipants.length > 0 ? (
-                          examParticipants.map((p: ExamParticipant) => (
-                            <div key={p.userId} className="flex items-center justify-between text-xs p-1 hover:bg-slate-50 rounded">
-                              <span className="font-medium text-slate-800">{p.name} <span className="text-slate-400 font-normal">@{p.username}</span></span>
-                              <span className="bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider">
-                                {p.owner ? "Propietario" : p.role === "editor" ? "Editor" : "Lector"}
-                              </span>
-                            </div>
-                          ))
+                          (() => {
+                            const canManageParticipants = examParticipants.some(
+                              (participant) =>
+                                participant.userId === user?.id && (participant.owner || participant.role === "owner"),
+                            );
+                            return examParticipants.map((p: ExamParticipant) => (
+                              <div key={p.userId} className="flex items-center justify-between gap-2 text-xs p-1 hover:bg-slate-50 rounded">
+                                <span className="min-w-0 font-medium text-slate-800 truncate">
+                                  {p.name} <span className="text-slate-400 font-normal">@{p.username}</span>
+                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="bg-slate-100 border border-slate-200 text-slate-600 px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider">
+                                    {p.owner ? "Propietario" : p.role === "editor" ? "Editor" : "Lector"}
+                                  </span>
+                                  {canManageParticipants && !p.owner && p.role !== "owner" ? (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!shareTarget || shareTarget.resourceType !== "exam") {
+                                          return;
+                                        }
+                                        onRequestRemoveExamParticipant(shareTarget.resourceId, p, shareTarget.resourceName);
+                                      }}
+                                      disabled={updatingExamParticipantUserId === p.userId}
+                                      className="rounded border border-rose-300 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Quitar
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+                            ));
+                          })()
                       ) : (
                           <p className="text-xs text-slate-500 py-1 text-center italic">Aun nadie tiene acceso a este examen.</p>
                       )}
@@ -15325,6 +16021,7 @@ export default function DashboardPage() {
                 setExamParticipantsTarget(null);
                 setExamParticipants([]);
                 setUpdatingExamParticipantUserId(null);
+                setRemoveExamParticipantPrompt(null);
               }}
             >
               <div className="space-y-3">
@@ -15462,6 +16159,20 @@ export default function DashboardPage() {
                             >
                               {participant.canRenameExam ? "Quitar renombrar" : "Permitir renombrar"}
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onRequestRemoveExamParticipant(
+                                  examParticipantsTarget.id,
+                                  participant,
+                                  examParticipantsTarget.name,
+                                );
+                              }}
+                              disabled={updatingExamParticipantUserId === participant.userId}
+                              className="rounded-lg border border-rose-300 px-3 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              Quitar del examen
+                            </button>
                           </div>
                         ) : null}
                       </article>
@@ -15472,23 +16183,85 @@ export default function DashboardPage() {
             </ModalShell>
           ) : null}
 
+          {removeExamParticipantPrompt ? (
+            <ModalShell title="Quitar participante" onClose={onCancelRemoveExamParticipant}>
+              <div className="space-y-3">
+                <p className="text-sm text-slate-700">
+                  Vas a quitar a <span className="font-semibold">{removeExamParticipantPrompt.participant.name}</span> del
+                  examen <span className="font-semibold">{removeExamParticipantPrompt.examName}</span>.
+                </p>
+                <p className="text-xs text-slate-500">
+                  Esta accion revoca su acceso al examen y al repaso individual asociado.
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={onCancelRemoveExamParticipant}
+                    disabled={updatingExamParticipantUserId === removeExamParticipantPrompt.participant.userId}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onConfirmRemoveExamParticipant()}
+                    disabled={updatingExamParticipantUserId === removeExamParticipantPrompt.participant.userId}
+                    className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {updatingExamParticipantUserId === removeExamParticipantPrompt.participant.userId
+                      ? "Quitando..."
+                      : "Quitar del examen"}
+                  </button>
+                </div>
+              </div>
+            </ModalShell>
+          ) : null}
+
+          {claimedExamInvitePrompt ? (
+            <ModalShell title="Invitacion aceptada" onClose={onStayOnHomeAfterClaim}>
+              <div className="space-y-3">
+                <p className="text-sm text-slate-700">
+                  El examen <span className="font-semibold">{claimedExamInvitePrompt.examName}</span> ya se agrego a tu
+                  lista de examenes.
+                </p>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={onStayOnHomeAfterClaim}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Quedarse en inicio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onGoToClaimedExam()}
+                    className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88]"
+                  >
+                    Ir a examenes
+                  </button>
+                </div>
+              </div>
+            </ModalShell>
+          ) : null}
+
           {showGroupRoomClosedModal ? (
             <ModalShell
               title="Sala cerrada"
-              onClose={() => {
-                setShowGroupRoomClosedModal(false);
-                setActive("examenes");
-              }}
+              onClose={onKeepViewingClosedGroupRoomResult}
             >
               <div className="space-y-3">
                 <p className="text-sm text-slate-700">{groupRoomClosedMessage}</p>
-                <div className="flex justify-end">
+                <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setShowGroupRoomClosedModal(false);
-                      setActive("examenes");
-                    }}
+                    onClick={onKeepViewingClosedGroupRoomResult}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Seguir viendo resultado final
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onGoToExamsAfterGroupRoomClosed}
                     className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                   >
                     Volver a examenes
@@ -15773,3 +16546,4 @@ function ModalShell({
     </div>
   );
 }
+
