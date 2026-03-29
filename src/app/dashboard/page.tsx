@@ -7612,6 +7612,22 @@ export default function DashboardPage() {
       resetPracticeInputState();
     };
 
+    const shouldAttemptSessionRecovery = (error: unknown): boolean => {
+      if (!(error instanceof Error)) {
+        return false;
+      }
+      const normalizedMessage = error.message
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      return (
+        normalizedMessage.includes("sesion grupal no encontrada") ||
+        normalizedMessage.includes("session not found") ||
+        normalizedMessage.includes("resource not found") ||
+        normalizedMessage.includes("recurso no encontrado")
+      );
+    };
+
     const pollHandle = window.setInterval(() => {
       if (groupStatePollInFlightRef.current) {
         return;
@@ -7619,30 +7635,15 @@ export default function DashboardPage() {
       void (async () => {
         groupStatePollInFlightRef.current = true;
         try {
-          // Intentar estado con sessionId actual
           const state = (await fetchJson(
             `/api/v1/ia/exams/${examId}/practice/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
             user.token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, state));
-
-          if ((state.status ?? "").toLowerCase() === "finished") {
-            try {
-              const latestState = (await postJson(
-                `/api/v1/ia/exams/${examId}/practice/group/join`,
-                user.token,
-                { userId: user.id },
-              )) as ExamGroupState;
-              if (latestState && latestState.sessionId !== state.sessionId) {
-                applyLatestSessionState(latestState);
-              }
-            } catch {
-              // No hay una nueva sesión todavía; mantener vista final actual.
-            }
+        } catch (pollError) {
+          if (!shouldAttemptSessionRecovery(pollError)) {
+            return;
           }
-        } catch {
-          // Si el backend rechaza el sessionId (sesión cerrada/reiniciada por admin),
-          // hacer un join para obtener la sesión activa más reciente y redirigir
           try {
             const latestState = (await postJson(
               `/api/v1/ia/exams/${examId}/practice/group/join`,
@@ -11436,6 +11437,7 @@ export default function DashboardPage() {
           : null;
         const canStartGroup = Boolean(groupPracticeState.canStartGroup);
         const waitingParticipants = groupPracticeState.participants;
+        const connectedWaitingParticipants = waitingParticipants.filter((participant) => Boolean(participant.connected));
         const toNumericScore = (value: number | null | undefined): number => {
           const normalized = Number(value ?? 0);
           return Number.isFinite(normalized) ? normalized : 0;
@@ -11580,7 +11582,7 @@ export default function DashboardPage() {
                 </span>
                 <span className="rounded-full bg-slate-100 px-3 py-1 font-semibold text-slate-700">
                   Participantes conectados:{" "}
-                  {waitingParticipants.filter((participant) => Boolean(participant.connected)).length}
+                  {connectedWaitingParticipants.length}
                 </span>
                 {groupPracticeState.status === "active" && currentGroupQuestion ? (
                   <span className="rounded-full bg-blue-100 px-3 py-1 font-semibold text-blue-800">
@@ -11625,7 +11627,7 @@ export default function DashboardPage() {
                       <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
                         <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Participantes en sala</p>
                         <div className="mt-3 flex flex-wrap gap-3">
-                          {waitingParticipants.map((participant) => {
+                          {connectedWaitingParticipants.map((participant) => {
                             const initials = (participant.name || "?")
                               .split(" ")
                               .filter(Boolean)
@@ -11657,6 +11659,9 @@ export default function DashboardPage() {
                               </div>
                             );
                           })}
+                          {connectedWaitingParticipants.length === 0 ? (
+                            <p className="text-xs text-slate-500">No hay participantes conectados en este momento.</p>
+                          ) : null}
                         </div>
                       </div>
                     </div>
