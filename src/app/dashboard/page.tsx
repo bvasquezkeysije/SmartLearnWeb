@@ -1946,6 +1946,8 @@ export default function DashboardPage() {
   const groupQuestionRuntimeKeyRef = useRef<string | null>(null);
   const groupReviewQuestionKeyRef = useRef<string | null>(null);
   const groupReviewStartedAtMsRef = useRef<number | null>(null);
+  const groupStatePollInFlightRef = useRef(false);
+  const groupReviewRefreshInFlightRef = useRef(false);
   const groupInputQuestionKeyRef = useRef<string | null>(null);
   const [groupAnswersByQuestionKey, setGroupAnswersByQuestionKey] = useState<Record<string, ExamGroupCurrentAnswer[]>>({});
   const groupQuestionStartedAt = groupPracticeState?.questionStartedAt ?? null;
@@ -7174,7 +7176,12 @@ export default function DashboardPage() {
       setGroupQuestionRemainingSeconds(null);
       setGroupAutoSubmitKey(null);
       setGroupTimerExpired(false);
+      setGroupTimerExpiredQuestionKey(null);
+      setGroupAutoAdvanceSecondsLeft(null);
       groupQuestionRuntimeKeyRef.current = null;
+      groupReviewQuestionKeyRef.current = null;
+      groupReviewStartedAtMsRef.current = null;
+      groupReviewRefreshInFlightRef.current = false;
       setGroupAnswersByQuestionKey({});
       setPracticeFeedbackStatus(null);
       resetPracticeInputState();
@@ -7593,8 +7600,24 @@ export default function DashboardPage() {
     const sessionId = groupPracticeState.sessionId;
     const examId = selectedExam.id;
 
+    const applyLatestSessionState = (latestState: ExamGroupState) => {
+      setGroupPracticeState((previous) => mergeGroupState(previous, latestState));
+      setGroupTimerExpired(false);
+      setGroupTimerExpiredQuestionKey(null);
+      setGroupAutoSubmitKey(null);
+      setGroupAutoAdvanceSecondsLeft(null);
+      setPracticeFeedbackStatus(null);
+      groupReviewQuestionKeyRef.current = null;
+      groupReviewStartedAtMsRef.current = null;
+      resetPracticeInputState();
+    };
+
     const pollHandle = window.setInterval(() => {
+      if (groupStatePollInFlightRef.current) {
+        return;
+      }
       void (async () => {
+        groupStatePollInFlightRef.current = true;
         try {
           // Intentar estado con sessionId actual
           const state = (await fetchJson(
@@ -7602,6 +7625,21 @@ export default function DashboardPage() {
             user.token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, state));
+
+          if ((state.status ?? "").toLowerCase() === "finished") {
+            try {
+              const latestState = (await postJson(
+                `/api/v1/ia/exams/${examId}/practice/group/join`,
+                user.token,
+                { userId: user.id },
+              )) as ExamGroupState;
+              if (latestState && latestState.sessionId !== state.sessionId) {
+                applyLatestSessionState(latestState);
+              }
+            } catch {
+              // No hay una nueva sesión todavía; mantener vista final actual.
+            }
+          }
         } catch {
           // Si el backend rechaza el sessionId (sesión cerrada/reiniciada por admin),
           // hacer un join para obtener la sesión activa más reciente y redirigir
@@ -7612,12 +7650,9 @@ export default function DashboardPage() {
               { userId: user.id },
             )) as ExamGroupState;
             if (latestState && latestState.sessionId !== sessionId) {
-              // Nueva sesión detectada: redirigir al usuario a la sala de espera
+              applyLatestSessionState(latestState);
+            } else if (latestState) {
               setGroupPracticeState((previous) => mergeGroupState(previous, latestState));
-              setGroupTimerExpired(false);
-              resetPracticeInputState();
-              setGroupAutoSubmitKey(null);
-              setPracticeFeedbackStatus(null);
             }
           } catch {
             setGroupRoomClosedMessage(
@@ -7629,11 +7664,16 @@ export default function DashboardPage() {
               window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
             }
           }
+        } finally {
+          groupStatePollInFlightRef.current = false;
         }
       })();
     }, 1000);
 
-    return () => window.clearInterval(pollHandle);
+    return () => {
+      window.clearInterval(pollHandle);
+      groupStatePollInFlightRef.current = false;
+    };
   }, [
     showGroupPracticeRunnerModal,
     showGroupRoomClosedModal,
@@ -7871,10 +7911,14 @@ export default function DashboardPage() {
       if (!user || !selectedExam || !groupPracticeState) {
         return;
       }
+      if (groupReviewRefreshInFlightRef.current) {
+        return;
+      }
       const sessionId = groupPracticeState.sessionId;
       const examId = selectedExam.id;
       const userId = user.id;
       const token = user.token;
+      groupReviewRefreshInFlightRef.current = true;
       void (async () => {
         try {
           const freshState = (await fetchJson(
@@ -7884,6 +7928,8 @@ export default function DashboardPage() {
           setGroupPracticeState((previous) => mergeGroupState(previous, freshState));
         } catch {
           // silencio: el polling principal seguirá intentando.
+        } finally {
+          groupReviewRefreshInFlightRef.current = false;
         }
       })();
     };
@@ -7901,10 +7947,12 @@ export default function DashboardPage() {
     };
 
     updateCountdown();
-    const intervalHandle = window.setInterval(() => {
+    const countdownHandle = window.setInterval(() => {
       updateCountdown();
-      refreshReviewState();
     }, 1000);
+    const refreshHandle = window.setInterval(() => {
+      refreshReviewState();
+    }, 2500);
 
     const elapsedMs = Math.max(0, Date.now() - reviewStartedAt);
     const remainingMs = Math.max(0, revealSeconds * 1000 - elapsedMs);
@@ -7916,8 +7964,10 @@ export default function DashboardPage() {
     }, remainingMs);
 
     return () => {
-      window.clearInterval(intervalHandle);
+      window.clearInterval(countdownHandle);
+      window.clearInterval(refreshHandle);
       window.clearTimeout(timeoutHandle);
+      groupReviewRefreshInFlightRef.current = false;
     };
   }, [
     showGroupPracticeRunnerModal,
