@@ -1274,6 +1274,10 @@ function dashboardProfileImageKey(userId: number): string {
   return `smartlearn_dashboard_profile_image_${userId}`;
 }
 
+function dashboardSidebarOpenKey(userId: number): string {
+  return `smartlearn_dashboard_sidebar_open_${userId}`;
+}
+
 function isIaChatSummaryPayload(value: unknown): value is ChatSummary {
   if (!value || typeof value !== "object") {
     return false;
@@ -2124,6 +2128,12 @@ export default function DashboardPage() {
         ...parsed,
         token,
       };
+      const savedSidebarOpen = localStorage.getItem(dashboardSidebarOpenKey(parsed.id));
+      if (savedSidebarOpen === "0") {
+        setSidebarOpen(false);
+      } else if (savedSidebarOpen === "1") {
+        setSidebarOpen(true);
+      }
       setUser(fullUser);
       const admin = isAdminSessionUser(fullUser);
       const allowedSections = (admin ? adminMenu : portalMenu).map((item) => item.key);
@@ -2256,6 +2266,13 @@ export default function DashboardPage() {
     setUserMenuOpen(false);
     setNotificationPanelOpen(false);
   }, [user, active]);
+
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+    localStorage.setItem(dashboardSidebarOpenKey(user.id), sidebarOpen ? "1" : "0");
+  }, [user, sidebarOpen]);
 
   useEffect(() => {
     groupPracticeRestoreTriedRef.current = false;
@@ -2980,6 +2997,7 @@ export default function DashboardPage() {
       localStorage.removeItem(dashboardCourseViewKey(sessionUser.id));
       localStorage.removeItem(dashboardSalaViewKey(sessionUser.id));
       localStorage.removeItem(dashboardGroupPracticeViewKey(sessionUser.id));
+      localStorage.removeItem(dashboardSidebarOpenKey(sessionUser.id));
     }
     localStorage.removeItem("smartlearn_token");
     localStorage.removeItem("smartlearn_user");
@@ -16517,6 +16535,7 @@ export default function DashboardPage() {
                   }}
                   className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20 sm:h-11 sm:w-11"
                   aria-label="Notificaciones"
+                  aria-expanded={notificationPanelOpen}
                   title="Notificaciones"
                 >
                   <svg
@@ -16527,8 +16546,12 @@ export default function DashboardPage() {
                     strokeWidth="2"
                     className="h-5 w-5"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 17H9a4 4 0 0 1-4-4v-3a7 7 0 1 1 14 0v3a4 4 0 0 1-4 4Z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 20a2 2 0 0 0 4 0" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M15 17h5l-1.405-1.405A2.03 2.03 0 0 1 18 14.158V11a6 6 0 1 0-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 17a3 3 0 1 0 6 0" />
                   </svg>
                   {unreadNotificationsCount > 0 ? (
                     <span className="absolute -right-1 -top-1 inline-flex min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
@@ -16538,7 +16561,7 @@ export default function DashboardPage() {
                 </button>
 
                 {notificationPanelOpen ? (
-                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-40 w-[min(95vw,420px)] rounded-xl border border-slate-200 bg-white p-3 text-slate-800 shadow-2xl">
+                  <div className="fixed left-2 right-2 top-[4.25rem] z-40 overflow-hidden rounded-xl border border-slate-200 bg-white p-3 text-slate-800 shadow-2xl sm:absolute sm:left-auto sm:right-0 sm:top-[calc(100%+0.5rem)] sm:w-[min(95vw,420px)]">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold text-slate-900">
                         Notificaciones{unreadNotificationsCount > 0 ? ` (${unreadNotificationsBadgeLabel})` : ""}
@@ -16553,7 +16576,7 @@ export default function DashboardPage() {
                       </button>
                     </div>
 
-                    <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                    <div className="mt-3 max-h-[52dvh] space-y-2 overflow-y-auto pr-1 sm:max-h-[360px]">
                       {homeShareNotificationsLoading ? (
                         <article className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                           Cargando...
