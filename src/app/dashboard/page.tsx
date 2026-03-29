@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
@@ -61,6 +61,7 @@ type ExamSummary = {
   canEditQuestions?: boolean | null;
   canEditSettings?: boolean | null;
   canShare?: boolean | null;
+  canStartGroup?: boolean | null;
   canRenameExam?: boolean | null;
   participantsCount?: number | null;
   groupPracticeSessionId?: number | null;
@@ -230,7 +231,7 @@ const mergeGroupState = (previous: ExamGroupState | null, incoming: ExamGroupSta
   const previousIndex = previous.currentQuestionIndex ?? 0;
   const incomingIndex = incoming.currentQuestionIndex ?? 0;
 
-  // Ignorar snapshots tardÃ­os que regresan a una pregunta anterior.
+  // Ignorar snapshots tardíos que regresan a una pregunta anterior.
   if (previousStatus === "active" && incomingStatus === "active" && incomingIndex < previousIndex) {
     return previous;
   }
@@ -437,8 +438,18 @@ type SalaItem = {
   visibility: "public" | "private";
   description: string;
   imageData?: string | null;
+  ownerUserId?: number | null;
+  accessRole?: "owner" | "editor" | "viewer" | string;
+  canEdit?: boolean;
+  canShare?: boolean;
+  createdAt?: unknown;
   participants: SalaParticipant[];
   messages: SalaMessage[];
+};
+
+type SalaModulePayload = {
+  salas: SalaItem[];
+  selectedSalaId?: number | null;
 };
 
 type ScheduleDayKey = "all" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
@@ -454,9 +465,35 @@ type ScheduleActivity = {
   color: ScheduleColorKey;
 };
 
+type ScheduleProfileOption = {
+  profileId: number;
+  profileName: string;
+  ownerUserId?: number | null;
+  ownerName?: string | null;
+  accessRole?: "owner" | "editor" | "viewer" | string | null;
+  canEdit?: boolean | null;
+  canShare?: boolean | null;
+  createdAt?: unknown;
+};
+
+type ScheduleModulePayload = {
+  profileId: number;
+  profileName: string;
+  description?: string | null;
+  ownerUserId?: number | null;
+  accessRole?: "owner" | "editor" | "viewer" | string | null;
+  canEdit?: boolean | null;
+  canShare?: boolean | null;
+  profiles: ScheduleProfileOption[];
+  referenceImageData?: string | null;
+  referenceImageName?: string | null;
+  activities: ScheduleActivity[];
+  createdAt?: unknown;
+};
+
 type ShareLinkResponse = {
   id: number;
-  resourceType: "exam" | "course" | string;
+  resourceType: "exam" | "course" | "schedule" | "sala" | string;
   resourceId: number;
   token: string;
   expiresAt?: unknown;
@@ -464,13 +501,13 @@ type ShareLinkResponse = {
 };
 
 type ShareLinkClaimResponse = {
-  resourceType: "exam" | "course" | string;
+  resourceType: "exam" | "course" | "schedule" | "sala" | string;
   resourceId: number;
   resourceName?: string | null;
   message?: string | null;
 };
 
-type ShareResourceType = "exam" | "course" | "sala";
+type ShareResourceType = "exam" | "course" | "sala" | "schedule";
 
 type ShareRecipient = {
   id: number;
@@ -553,9 +590,9 @@ type SupportModulePayload = {
   adminView: boolean;
 };
 
-const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8081").replace(/\/$/, "");
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 const SESSION_EXPIRED_EVENT_NAME = "smartlearn:session-expired";
-const SESSION_INACTIVITY_TIMEOUT_MS = 10 * 60 * 1000;
+const SESSION_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 const PRESENCE_HEARTBEAT_INTERVAL_MS = 45 * 1000;
 const SESSION_INACTIVITY_TIMEOUT_LABEL =
   SESSION_INACTIVITY_TIMEOUT_MS < 60 * 1000
@@ -799,6 +836,31 @@ function scheduleColorClasses(color: ScheduleColorKey) {
   return SCHEDULE_COLOR_OPTIONS.find((option) => option.key === color) ?? SCHEDULE_COLOR_OPTIONS[0];
 }
 
+function normalizeScheduleDayKey(value: unknown): ScheduleDayKey {
+  if (value === "all") {
+    return "all";
+  }
+  if (
+    value === "monday" ||
+    value === "tuesday" ||
+    value === "wednesday" ||
+    value === "thursday" ||
+    value === "friday" ||
+    value === "saturday" ||
+    value === "sunday"
+  ) {
+    return value;
+  }
+  return "monday";
+}
+
+function normalizeScheduleColorKey(value: unknown): ScheduleColorKey {
+  if (value === "blue" || value === "emerald" || value === "amber" || value === "violet" || value === "rose") {
+    return value;
+  }
+  return "blue";
+}
+
 function timeToMinutes(value: string): number {
   const [hoursRaw, minutesRaw] = value.split(":");
   const hours = Number(hoursRaw);
@@ -885,6 +947,180 @@ const portalMenu: MenuItem[] = [
   { key: "perfil", label: "Perfil" },
   { key: "ayuda", label: "Ayuda" },
 ];
+
+type TutorialGuide = {
+  sectionTitle: string;
+  youtubeUrl: string | null;
+  description: string;
+  quickSteps: string[];
+};
+
+const defaultTutorialGuide: TutorialGuide = {
+  sectionTitle: "SmartLearn",
+  youtubeUrl: null,
+  description: "Este tutorial te muestra el flujo general del modulo actual.",
+  quickSteps: [
+    "Revisa los botones principales del modulo.",
+    "Crea o abre un recurso para practicar el flujo completo.",
+    "Guarda cambios y valida resultados antes de salir.",
+  ],
+};
+
+const tutorialGuideBySection: Record<string, TutorialGuide> = {
+  dashboard: {
+    sectionTitle: "Dashboard",
+    youtubeUrl: null,
+    description: "Resumen del panel principal y accesos rapidos.",
+    quickSteps: [
+      "Identifica los indicadores principales.",
+      "Entra al modulo que necesitas desde el menu lateral.",
+      "Usa el boton de tutorial del modulo cuando tengas dudas.",
+    ],
+  },
+  inicio: {
+    sectionTitle: "Inicio",
+    youtubeUrl: null,
+    description: "Guia general para navegar por SmartLearn.",
+    quickSteps: [
+      "Revisa los accesos principales del inicio.",
+      "Selecciona el modulo de trabajo.",
+      "Confirma que tu sesion y perfil esten correctos.",
+    ],
+  },
+  ia: {
+    sectionTitle: "IA",
+    youtubeUrl: null,
+    description: "Aprende a crear contenido y examenes asistidos por IA.",
+    quickSteps: [
+      "Selecciona o crea un chat.",
+      "Escribe instrucciones claras para generar contenido.",
+      "Valida y guarda el resultado generado.",
+    ],
+  },
+  examenes: {
+    sectionTitle: "Examenes",
+    youtubeUrl: null,
+    description: "Gestion de examenes, preguntas y repaso.",
+    quickSteps: [
+      "Crea o importa un examen.",
+      "Configura preguntas, tiempos y opciones de repaso.",
+      "Comparte permisos y valida el flujo grupal o individual.",
+    ],
+  },
+  cursos: {
+    sectionTitle: "Cursos",
+    youtubeUrl: null,
+    description: "Administracion de cursos, sesiones y contenidos.",
+    quickSteps: [
+      "Crea un curso o abre uno existente.",
+      "Agrega sesiones y materiales.",
+      "Asigna participantes y revisa progreso.",
+    ],
+  },
+  salas: {
+    sectionTitle: "Salas",
+    youtubeUrl: null,
+    description: "Uso de salas colaborativas y comparticion de pantalla.",
+    quickSteps: [
+      "Crea o ingresa a una sala.",
+      "Gestiona participantes y chat.",
+      "Comparte pantalla y controla permisos.",
+    ],
+  },
+  horarios: {
+    sectionTitle: "Horarios",
+    youtubeUrl: null,
+    description: "Configuracion de actividades y agenda semanal.",
+    quickSteps: [
+      "Crea actividades con dia y hora.",
+      "Edita colores y ubicaciones.",
+      "Valida la vista semanal o por imagen.",
+    ],
+  },
+  perfil: {
+    sectionTitle: "Perfil",
+    youtubeUrl: null,
+    description: "Actualizacion de datos personales y seguridad.",
+    quickSteps: [
+      "Edita tu informacion basica.",
+      "Actualiza foto y contrasena.",
+      "Guarda y verifica los cambios.",
+    ],
+  },
+  profile: {
+    sectionTitle: "Perfil",
+    youtubeUrl: null,
+    description: "Actualizacion de datos personales y seguridad.",
+    quickSteps: [
+      "Edita tu informacion basica.",
+      "Actualiza foto y contrasena.",
+      "Guarda y verifica los cambios.",
+    ],
+  },
+  users: {
+    sectionTitle: "Usuarios",
+    youtubeUrl: null,
+    description: "Gestion administrativa de usuarios y roles.",
+    quickSteps: [
+      "Filtra usuarios por estado y busqueda.",
+      "Crea o edita perfiles.",
+      "Asigna roles y permisos.",
+    ],
+  },
+  support: {
+    sectionTitle: "Soporte",
+    youtubeUrl: null,
+    description: "Administracion de solicitudes y conversaciones de soporte.",
+    quickSteps: [
+      "Revisa conversaciones activas.",
+      "Responde y da seguimiento.",
+      "Cierra tickets cuando el caso quede resuelto.",
+    ],
+  },
+  ayuda: {
+    sectionTitle: "Ayuda",
+    youtubeUrl: null,
+    description: "Centro de ayuda y preguntas frecuentes.",
+    quickSteps: [
+      "Busca el tema que necesitas.",
+      "Abre el tutorial del modulo actual.",
+      "Si persiste la duda, contacta soporte.",
+    ],
+  },
+};
+
+function resolveTutorialGuide(sectionKey: string): TutorialGuide {
+  const normalized = sectionKey.trim().toLowerCase();
+  return tutorialGuideBySection[normalized] ?? defaultTutorialGuide;
+}
+
+function extractYoutubeVideoId(urlValue: string | null): string | null {
+  if (!urlValue) {
+    return null;
+  }
+  try {
+    const parsed = new URL(urlValue);
+    const host = parsed.hostname.toLowerCase();
+    let videoId: string | null = null;
+
+    if (host === "youtu.be" || host.endsWith(".youtu.be")) {
+      videoId = parsed.pathname.replace(/^\/+/, "").split("/")[0] ?? null;
+    } else if (host.includes("youtube.com")) {
+      if (parsed.pathname === "/watch") {
+        videoId = parsed.searchParams.get("v");
+      } else if (parsed.pathname.startsWith("/embed/")) {
+        videoId = parsed.pathname.replace("/embed/", "").split("/")[0] ?? null;
+      } else if (parsed.pathname.startsWith("/shorts/")) {
+        videoId = parsed.pathname.replace("/shorts/", "").split("/")[0] ?? null;
+      }
+    }
+
+    const normalizedId = (videoId ?? "").trim();
+    return /^[A-Za-z0-9_-]{11}$/.test(normalizedId) ? normalizedId : null;
+  } catch {
+    return null;
+  }
+}
 
 function MenuItemIcon({ itemKey }: { itemKey: string }) {
   const iconClass = "h-4 w-4 shrink-0";
@@ -1148,6 +1384,172 @@ function parseCourseModulePayload(value: unknown): CourseModulePayload {
   return { courses, availableExams };
 }
 
+function isSalaParticipantPayload(value: unknown): value is SalaParticipant {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "number" &&
+    typeof record.name === "string" &&
+    (!("micOn" in record) || typeof record.micOn === "boolean") &&
+    (!("isScreenSharing" in record) || typeof record.isScreenSharing === "boolean")
+  );
+}
+
+function isSalaMessagePayload(value: unknown): value is SalaMessage {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "number" &&
+    typeof record.sender === "string" &&
+    typeof record.content === "string" &&
+    (!("isCurrentUser" in record) || typeof record.isCurrentUser === "boolean")
+  );
+}
+
+function isSalaItemPayload(value: unknown): value is SalaItem {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "number" &&
+    typeof record.name === "string" &&
+    typeof record.code === "string" &&
+    typeof record.visibility === "string" &&
+    Array.isArray(record.participants) &&
+    record.participants.every((participant) => isSalaParticipantPayload(participant)) &&
+    Array.isArray(record.messages) &&
+    record.messages.every((message) => isSalaMessagePayload(message))
+  );
+}
+
+function parseSalaModulePayload(value: unknown): SalaModulePayload {
+  if (!value || typeof value !== "object") {
+    return { salas: [], selectedSalaId: null };
+  }
+  const record = value as Record<string, unknown>;
+  const salas = Array.isArray(record.salas) ? record.salas.filter((item) => isSalaItemPayload(item)) : [];
+  return {
+    salas: salas.map((sala) => ({
+      ...sala,
+      visibility: sala.visibility === "private" ? "private" : "public",
+      description: sala.description?.trim() || "Sala sin descripcion.",
+      imageData: sala.imageData?.trim() ? sala.imageData.trim() : null,
+      ownerUserId: typeof sala.ownerUserId === "number" ? sala.ownerUserId : null,
+      accessRole: typeof sala.accessRole === "string" ? sala.accessRole : "owner",
+      canEdit: sala.canEdit !== false,
+      canShare: sala.canShare === true,
+      participants: sala.participants.map((participant) => ({
+        id: participant.id,
+        name: participant.name,
+        micOn: Boolean(participant.micOn),
+        isScreenSharing: Boolean(participant.isScreenSharing),
+      })),
+      messages: sala.messages.map((message) => ({
+        id: message.id,
+        sender: message.sender,
+        content: message.content,
+        isCurrentUser: Boolean(message.isCurrentUser),
+      })),
+    })),
+    selectedSalaId: typeof record.selectedSalaId === "number" ? record.selectedSalaId : null,
+  };
+}
+
+function isScheduleActivityPayload(value: unknown): value is ScheduleActivity {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    typeof record.id === "number" &&
+    typeof record.title === "string" &&
+    typeof record.day === "string" &&
+    typeof record.startTime === "string" &&
+    typeof record.endTime === "string" &&
+    typeof record.color === "string"
+  );
+}
+
+function isScheduleProfileOptionPayload(value: unknown): value is ScheduleProfileOption {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return typeof record.profileId === "number" && typeof record.profileName === "string";
+}
+
+function parseScheduleModulePayload(value: unknown): ScheduleModulePayload {
+  if (!value || typeof value !== "object") {
+    return {
+      profileId: 0,
+      profileName: "Mi horario",
+      accessRole: "owner",
+      canEdit: true,
+      canShare: true,
+      profiles: [],
+      activities: [],
+    };
+  }
+  const record = value as Record<string, unknown>;
+  const activities = Array.isArray(record.activities)
+    ? record.activities.filter((item) => isScheduleActivityPayload(item))
+    : [];
+  const parsedProfiles = Array.isArray(record.profiles)
+    ? record.profiles.filter((item) => isScheduleProfileOptionPayload(item))
+    : [];
+  const fallbackProfileId = typeof record.profileId === "number" ? record.profileId : 0;
+  const fallbackProfileName = typeof record.profileName === "string" ? record.profileName : "Mi horario";
+  const fallbackProfile: ScheduleProfileOption = {
+    profileId: fallbackProfileId,
+    profileName: fallbackProfileName,
+    ownerUserId: typeof record.ownerUserId === "number" ? record.ownerUserId : null,
+    accessRole: typeof record.accessRole === "string" ? record.accessRole : "owner",
+    canEdit: record.canEdit !== false,
+    canShare: record.canShare === true,
+    createdAt: record.createdAt,
+  };
+  const profilesById = new Map<number, ScheduleProfileOption>();
+  parsedProfiles.forEach((profile) => {
+    const normalizedId = Math.trunc(profile.profileId);
+    if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
+      return;
+    }
+    profilesById.set(normalizedId, {
+      profileId: normalizedId,
+      profileName: typeof profile.profileName === "string" ? profile.profileName : "Horario",
+      ownerUserId: typeof profile.ownerUserId === "number" ? profile.ownerUserId : null,
+      ownerName: typeof profile.ownerName === "string" ? profile.ownerName : null,
+      accessRole: typeof profile.accessRole === "string" ? profile.accessRole : "viewer",
+      canEdit: profile.canEdit !== false,
+      canShare: profile.canShare === true,
+      createdAt: profile.createdAt,
+    });
+  });
+  if (fallbackProfile.profileId > 0) {
+    profilesById.set(fallbackProfile.profileId, fallbackProfile);
+  }
+
+  return {
+    profileId: fallbackProfileId,
+    profileName: fallbackProfileName,
+    description: typeof record.description === "string" ? record.description : null,
+    ownerUserId: typeof record.ownerUserId === "number" ? record.ownerUserId : null,
+    accessRole: typeof record.accessRole === "string" ? record.accessRole : "owner",
+    canEdit: record.canEdit !== false,
+    canShare: record.canShare === true,
+    profiles: Array.from(profilesById.values()),
+    referenceImageData: typeof record.referenceImageData === "string" ? record.referenceImageData : null,
+    referenceImageName: typeof record.referenceImageName === "string" ? record.referenceImageName : null,
+    activities,
+    createdAt: record.createdAt,
+  };
+}
+
 function isShareRecipientPayload(value: unknown): value is ShareRecipient {
   if (!value || typeof value !== "object") {
     return false;
@@ -1322,6 +1724,7 @@ export default function DashboardPage() {
   }, []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [showTutorialModal, setShowTutorialModal] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [payload, setPayload] = useState<unknown>(null);
@@ -1552,6 +1955,7 @@ export default function DashboardPage() {
   const groupCanStartGroup = Boolean(groupPracticeState?.canStartGroup);
   const [groupAutoAdvanceSecondsLeft, setGroupAutoAdvanceSecondsLeft] = useState<number | null>(null);
   const [groupSubmittedQuestionKey, setGroupSubmittedQuestionKey] = useState<string | null>(null);
+  const [groupDraftQuestionKey, setGroupDraftQuestionKey] = useState<string | null>(null);
   const [practiceQuestions, setPracticeQuestions] = useState<ExamQuestion[]>([]);
   const [practiceIndex, setPracticeIndex] = useState(0);
   const [practiceSelectedOption, setPracticeSelectedOption] = useState<"a" | "b" | "c" | "d" | null>(null);
@@ -1563,7 +1967,7 @@ export default function DashboardPage() {
   const [practiceChronoSeconds, setPracticeChronoSeconds] = useState(0);
   const [practiceRemainingSeconds, setPracticeRemainingSeconds] = useState<number | null>(null);
   const [practiceOriginSection, setPracticeOriginSection] = useState<"ia" | "examenes" | "cursos">("examenes");
-  const [salasData, setSalasData] = useState<SalaItem[]>(() => createInitialSalaItems());
+  const [salasData, setSalasData] = useState<SalaItem[]>([]);
   const [selectedSalaId, setSelectedSalaId] = useState<number | null>(null);
   const [salasParticipantsOpen, setSalasParticipantsOpen] = useState(false);
   const [salasChatOpen, setSalasChatOpen] = useState(true);
@@ -1612,39 +2016,18 @@ export default function DashboardPage() {
   const [scheduleMessage, setScheduleMessage] = useState("");
   const [scheduleMessageType, setScheduleMessageType] = useState<"info" | "success" | "error">("info");
   const [scheduleActionMenuId, setScheduleActionMenuId] = useState<number | null>(null);
+  const [scheduleProfileId, setScheduleProfileId] = useState<number | null>(null);
+  const [scheduleProfileName, setScheduleProfileName] = useState("Mi horario");
+  const [scheduleAccessRole, setScheduleAccessRole] = useState("owner");
+  const [scheduleOwnerUserId, setScheduleOwnerUserId] = useState<number | null>(null);
+  const [scheduleCanEdit, setScheduleCanEdit] = useState(true);
+  const [scheduleCanShare, setScheduleCanShare] = useState(true);
+  const [schedulePreferredProfileId, setSchedulePreferredProfileId] = useState<number | null>(null);
+  const [scheduleProfiles, setScheduleProfiles] = useState<ScheduleProfileOption[]>([]);
   const [editingScheduleId, setEditingScheduleId] = useState<number | null>(null);
-  const [scheduleActivities, setScheduleActivities] = useState<ScheduleActivity[]>([
-    {
-      id: 1,
-      title: "Matematica I",
-      description: "Sesion teoria y practica",
-      day: "monday",
-      startTime: "08:00",
-      endTime: "10:00",
-      location: "Aula B-201",
-      color: "blue",
-    },
-    {
-      id: 2,
-      title: "Programacion",
-      description: "Laboratorio de codigo",
-      day: "wednesday",
-      startTime: "10:30",
-      endTime: "12:00",
-      location: "Lab 3",
-      color: "emerald",
-    },
-    {
-      id: 3,
-      title: "Calidad de Software",
-      description: "Revision de casos y metricas",
-      day: "friday",
-      startTime: "15:00",
-      endTime: "17:00",
-      location: "Aula A-104",
-      color: "violet",
-    },
-  ]);
+  const [savingScheduleActivity, setSavingScheduleActivity] = useState(false);
+  const [deletingScheduleActivityId, setDeletingScheduleActivityId] = useState<number | null>(null);
+  const [scheduleActivities, setScheduleActivities] = useState<ScheduleActivity[]>([]);
   const [scheduleFormTitle, setScheduleFormTitle] = useState("");
   const [scheduleFormDescription, setScheduleFormDescription] = useState("");
   const [scheduleFormDay, setScheduleFormDay] = useState<ScheduleDayKey>("monday");
@@ -1672,6 +2055,8 @@ export default function DashboardPage() {
   const [examParticipantsTarget, setExamParticipantsTarget] = useState<ExamSummary | null>(null);
   const [homeShareNotifications, setHomeShareNotifications] = useState<ShareNotificationItem[]>([]);
   const [homeShareNotificationsLoading, setHomeShareNotificationsLoading] = useState(false);
+  const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
+  const [markingAllNotifications, setMarkingAllNotifications] = useState(false);
   const [claimedExamInvitePrompt, setClaimedExamInvitePrompt] = useState<{
     examId: number;
     examName: string;
@@ -1866,6 +2251,7 @@ export default function DashboardPage() {
     }
     localStorage.setItem(dashboardSectionKey(user.id), active);
     setUserMenuOpen(false);
+    setNotificationPanelOpen(false);
   }, [user, active]);
 
   useEffect(() => {
@@ -2214,6 +2600,21 @@ export default function DashboardPage() {
   );
 
   const menu = isAdmin ? adminMenu : portalMenu;
+  const activeTutorialGuide = useMemo(() => resolveTutorialGuide(active || "inicio"), [active]);
+  const activeTutorialVideoId = useMemo(
+    () => extractYoutubeVideoId(activeTutorialGuide.youtubeUrl),
+    [activeTutorialGuide.youtubeUrl],
+  );
+  const activeTutorialEmbedUrl = activeTutorialVideoId
+    ? `https://www.youtube.com/embed/${activeTutorialVideoId}`
+    : null;
+  const unreadNotificationsCount = useMemo(
+    () => homeShareNotifications.reduce((count, notification) => (!notification.readAt ? count + 1 : count), 0),
+    [homeShareNotifications],
+  );
+  const quickHeaderNotifications = useMemo(() => homeShareNotifications.slice(0, 12), [homeShareNotifications]);
+  const unreadNotificationsBadgeLabel =
+    unreadNotificationsCount > 99 ? "99+" : String(unreadNotificationsCount);
 
   const loadHomeShareNotifications = useCallback(async () => {
     if (!user) {
@@ -2278,6 +2679,18 @@ export default function DashboardPage() {
           setPayload(await fetchJson(`/api/v1/courses?userId=${userId}`, token));
           return;
         }
+        if (active === "horarios") {
+          const scheduleQuery =
+            schedulePreferredProfileId != null && schedulePreferredProfileId > 0
+              ? `&scheduleId=${schedulePreferredProfileId}`
+              : "";
+          setPayload(await fetchJson(`/api/v1/schedules?userId=${userId}${scheduleQuery}`, token));
+          return;
+        }
+        if (active === "salas") {
+          setPayload(await fetchJson(`/api/v1/salas?userId=${userId}`, token));
+          return;
+        }
         if (active === "ayuda" || active === "support") {
           setPayload(await fetchJson(`/api/v1/support/module?userId=${userId}`, token));
           return;
@@ -2313,10 +2726,95 @@ export default function DashboardPage() {
     };
 
     void loadSection();
-  }, [active, isAdmin, user]);
+  }, [active, isAdmin, schedulePreferredProfileId, user]);
 
   useEffect(() => {
-    if (!user || active !== "inicio") {
+    if (active !== "horarios") {
+      return;
+    }
+    const scheduleModule = parseScheduleModulePayload(payload);
+    const resolvedProfileId =
+      typeof scheduleModule.profileId === "number" && scheduleModule.profileId > 0 ? scheduleModule.profileId : null;
+    const profilesById = new Map<number, ScheduleProfileOption>();
+    scheduleModule.profiles.forEach((profile) => {
+      const normalizedId = Math.trunc(profile.profileId);
+      if (!Number.isFinite(normalizedId) || normalizedId <= 0) {
+        return;
+      }
+      profilesById.set(normalizedId, {
+        ...profile,
+        profileId: normalizedId,
+        profileName: profile.profileName?.trim() || "Horario",
+        accessRole: (profile.accessRole?.trim() || "viewer").toLowerCase(),
+      });
+    });
+    if (resolvedProfileId != null && !profilesById.has(resolvedProfileId)) {
+      profilesById.set(resolvedProfileId, {
+        profileId: resolvedProfileId,
+        profileName: scheduleModule.profileName?.trim() || "Mi horario",
+        ownerUserId:
+          typeof scheduleModule.ownerUserId === "number" && scheduleModule.ownerUserId > 0
+            ? scheduleModule.ownerUserId
+            : null,
+        accessRole: (scheduleModule.accessRole?.trim() || "owner").toLowerCase(),
+        canEdit: scheduleModule.canEdit !== false,
+        canShare: scheduleModule.canShare === true,
+        createdAt: scheduleModule.createdAt,
+      });
+    }
+    const availableProfiles = Array.from(profilesById.values());
+    setScheduleProfiles(availableProfiles);
+    setSchedulePreferredProfileId((current) => {
+      if (current != null && availableProfiles.some((profile) => profile.profileId === current)) {
+        return current;
+      }
+      return resolvedProfileId;
+    });
+
+    setScheduleProfileId(resolvedProfileId);
+    setScheduleProfileName(scheduleModule.profileName?.trim() || "Mi horario");
+    setScheduleAccessRole((scheduleModule.accessRole?.trim() || "owner").toLowerCase());
+    setScheduleOwnerUserId(
+      typeof scheduleModule.ownerUserId === "number" && scheduleModule.ownerUserId > 0
+        ? scheduleModule.ownerUserId
+        : null,
+    );
+    setScheduleCanEdit(scheduleModule.canEdit !== false);
+    setScheduleCanShare(scheduleModule.canShare === true);
+    setScheduleReferenceImageData(scheduleModule.referenceImageData?.trim() || null);
+    setScheduleReferenceImageName(scheduleModule.referenceImageName?.trim() || "");
+    setScheduleActivities(
+      scheduleModule.activities.map((activity) => ({
+        ...activity,
+        day: normalizeScheduleDayKey(activity.day),
+        color: normalizeScheduleColorKey(activity.color),
+      })),
+    );
+  }, [active, payload]);
+
+  useEffect(() => {
+    if (active !== "salas") {
+      return;
+    }
+    const salaModule = parseSalaModulePayload(payload);
+    setSalasData(salaModule.salas);
+    setSelectedSalaId((current) => {
+      if (current != null && salaModule.salas.some((room) => room.id === current)) {
+        return current;
+      }
+      const preferredId =
+        typeof salaModule.selectedSalaId === "number" && Number.isFinite(salaModule.selectedSalaId)
+          ? Math.trunc(salaModule.selectedSalaId)
+          : null;
+      if (preferredId != null && salaModule.salas.some((room) => room.id === preferredId)) {
+        return preferredId;
+      }
+      return null;
+    });
+  }, [active, payload]);
+
+  useEffect(() => {
+    if (!user) {
       return;
     }
 
@@ -2328,7 +2826,7 @@ export default function DashboardPage() {
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [active, user, loadHomeShareNotifications]);
+  }, [user, loadHomeShareNotifications]);
 
   useEffect(() => {
     if (!user) {
@@ -2432,6 +2930,23 @@ export default function DashboardPage() {
           return;
         }
 
+        if (result.resourceType === "schedule") {
+          const resolvedScheduleId =
+            Number.isFinite(result.resourceId) && result.resourceId > 0 ? result.resourceId : null;
+          if (resolvedScheduleId != null) {
+            setSchedulePreferredProfileId(resolvedScheduleId);
+            const scheduleModule = await fetchJson(
+              `/api/v1/schedules?userId=${user.id}&scheduleId=${resolvedScheduleId}`,
+              user.token,
+            );
+            setPayload(scheduleModule);
+          }
+          setActive("horarios");
+          setScheduleFeedback(result.message?.trim() || "Horario compartido agregado a tu modulo de horarios.", "success");
+          void loadHomeShareNotifications();
+          return;
+        }
+
         if (result.resourceType === "sala") {
           setActive("salas");
           if (Number.isFinite(result.resourceId) && result.resourceId > 0) {
@@ -2474,6 +2989,7 @@ export default function DashboardPage() {
       }
       sessionExpiredHandledRef.current = true;
       setUserMenuOpen(false);
+      setNotificationPanelOpen(false);
       clearSessionStorage(user);
       setSessionExpiredMessage(
         reason === "inactive"
@@ -2495,6 +3011,7 @@ export default function DashboardPage() {
 
   const onLogout = useCallback(() => {
     setUserMenuOpen(false);
+    setNotificationPanelOpen(false);
     clearSessionStorage(user);
     if (typeof window !== "undefined") {
       window.location.replace("/");
@@ -2609,6 +3126,23 @@ export default function DashboardPage() {
     setSalaMessageType(type);
   };
 
+  const reloadSalas = useCallback(
+    async (preferredSalaId?: number) => {
+      if (!user) {
+        return parseSalaModulePayload(null);
+      }
+      const normalizedPreferredId =
+        typeof preferredSalaId === "number" && Number.isFinite(preferredSalaId) && preferredSalaId > 0
+          ? Math.trunc(preferredSalaId)
+          : null;
+      const query = normalizedPreferredId != null ? `&salaId=${normalizedPreferredId}` : "";
+      const response = await fetchJson(`/api/v1/salas?userId=${user.id}${query}`, user.token);
+      setPayload(response);
+      return parseSalaModulePayload(response);
+    },
+    [user],
+  );
+
   const setScheduleFeedback = (message: string, type: "info" | "success" | "error") => {
     setScheduleMessage(message);
     setScheduleMessageType(type);
@@ -2703,6 +3237,46 @@ export default function DashboardPage() {
   const scheduleSlots = useMemo(() => buildScheduleSlots(7, 15, 60), []);
   const scheduleWeekDays = SCHEDULE_DAY_OPTIONS;
 
+  const reloadSchedules = useCallback(
+    async (preferredScheduleId?: number) => {
+      if (!user) {
+        return null;
+      }
+      const normalizedPreferredId =
+        typeof preferredScheduleId === "number" && Number.isFinite(preferredScheduleId) && preferredScheduleId > 0
+          ? Math.trunc(preferredScheduleId)
+          : null;
+      const query = normalizedPreferredId != null ? `&scheduleId=${normalizedPreferredId}` : "";
+      const response = await fetchJson(`/api/v1/schedules?userId=${user.id}${query}`, user.token);
+      setPayload(response);
+      return parseScheduleModulePayload(response);
+    },
+    [user],
+  );
+
+  const selectedScheduleProfileId =
+    schedulePreferredProfileId != null && schedulePreferredProfileId > 0
+      ? schedulePreferredProfileId
+      : scheduleProfileId != null && scheduleProfileId > 0
+        ? scheduleProfileId
+        : null;
+
+  const onSelectScheduleProfile = (event: ChangeEvent<HTMLSelectElement>) => {
+    const nextProfileId = Number(event.target.value);
+    if (!Number.isFinite(nextProfileId) || nextProfileId <= 0) {
+      return;
+    }
+    if (selectedScheduleProfileId === nextProfileId) {
+      return;
+    }
+    setSchedulePreferredProfileId(Math.trunc(nextProfileId));
+    setScheduleActionMenuId(null);
+    setEditingScheduleId(null);
+    setScheduleFeedback("Cargando horario seleccionado...", "info");
+  };
+
+  const scheduleProfileSelectValue = selectedScheduleProfileId != null ? String(selectedScheduleProfileId) : "";
+
   const onScheduleReferenceImageChange = async (event: ChangeEvent<HTMLInputElement>) => {
     const selectedFile = event.target.files?.[0];
 
@@ -2733,8 +3307,19 @@ export default function DashboardPage() {
     }
   };
 
-  const onCreateScheduleActivity = (event: FormEvent<HTMLFormElement>) => {
+  const onCreateScheduleActivity = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!user) {
+      return;
+    }
+    if (scheduleProfileId == null) {
+      setScheduleFeedback("No se encontro el horario activo.", "error");
+      return;
+    }
+    if (!scheduleCanEdit) {
+      setScheduleFeedback("Tu rol es de solo lectura en este horario.", "error");
+      return;
+    }
 
     const title = scheduleFormTitle.trim();
     const description = scheduleFormDescription.trim();
@@ -2752,63 +3337,83 @@ export default function DashboardPage() {
       return;
     }
 
-    if (editingScheduleId != null) {
-      setScheduleActivities((current) =>
-        current.map((activity) =>
-          activity.id === editingScheduleId
-            ? {
-                ...activity,
-                title,
-                description,
-                day: scheduleFormDay,
-                startTime: scheduleFormStartTime,
-                endTime: scheduleFormEndTime,
-                location,
-                color: scheduleFormColor,
-              }
-            : activity,
-        ),
-      );
-      setScheduleFeedback("Actividad actualizada.", "success");
-    } else {
-      setScheduleActivities((current) => [
-        ...current,
-        {
-          id: Date.now(),
-          title,
-          description,
-          day: scheduleFormDay,
-          startTime: scheduleFormStartTime,
-          endTime: scheduleFormEndTime,
-          location,
-          color: scheduleFormColor,
-        },
-      ]);
-      setScheduleFeedback("Actividad agregada al horario.", "success");
+    setSavingScheduleActivity(true);
+    try {
+      const body = {
+        userId: user.id,
+        title,
+        description: description || null,
+        day: scheduleFormDay,
+        startTime: scheduleFormStartTime,
+        endTime: scheduleFormEndTime,
+        location: location || null,
+        color: scheduleFormColor,
+      };
+      if (editingScheduleId != null) {
+        await patchJson(`/api/v1/schedules/${scheduleProfileId}/activities/${editingScheduleId}`, user.token, body);
+      } else {
+        await postJson(`/api/v1/schedules/${scheduleProfileId}/activities`, user.token, body);
+      }
+      await reloadSchedules(scheduleProfileId);
+      setScheduleFeedback(editingScheduleId != null ? "Actividad actualizada." : "Actividad agregada al horario.", "success");
+      setScheduleFormTitle("");
+      setScheduleFormDescription("");
+      setScheduleFormDay("monday");
+      setScheduleFormStartTime("08:00");
+      setScheduleFormEndTime("09:30");
+      setScheduleFormLocation("");
+      setScheduleFormColor("blue");
+      setEditingScheduleId(null);
+      setScheduleActionMenuId(null);
+      setShowCreateScheduleModal(false);
+    } catch (scheduleError) {
+      if (scheduleError instanceof Error) {
+        setScheduleFeedback(scheduleError.message, "error");
+      } else {
+        setScheduleFeedback("No se pudo guardar la actividad.", "error");
+      }
+    } finally {
+      setSavingScheduleActivity(false);
     }
-
-    setScheduleFormTitle("");
-    setScheduleFormDescription("");
-    setScheduleFormDay("monday");
-    setScheduleFormStartTime("08:00");
-    setScheduleFormEndTime("09:30");
-    setScheduleFormLocation("");
-    setScheduleFormColor("blue");
-    setEditingScheduleId(null);
-    setScheduleActionMenuId(null);
-    setShowCreateScheduleModal(false);
   };
 
-  const onDeleteScheduleActivity = (activityId: number) => {
-    setScheduleActivities((current) => current.filter((activity) => activity.id !== activityId));
-    if (editingScheduleId === activityId) {
-      setEditingScheduleId(null);
+  const onDeleteScheduleActivity = async (activityId: number) => {
+    if (!user) {
+      return;
     }
-    setScheduleActionMenuId(null);
-    setScheduleFeedback("Actividad eliminada del horario.", "success");
+    if (scheduleProfileId == null) {
+      setScheduleFeedback("No se encontro el horario activo.", "error");
+      return;
+    }
+    if (!scheduleCanEdit) {
+      setScheduleFeedback("Tu rol es de solo lectura en este horario.", "error");
+      return;
+    }
+    setDeletingScheduleActivityId(activityId);
+    try {
+      await deleteJson(`/api/v1/schedules/${scheduleProfileId}/activities/${activityId}?userId=${user.id}`, user.token);
+      await reloadSchedules(scheduleProfileId);
+      if (editingScheduleId === activityId) {
+        setEditingScheduleId(null);
+      }
+      setScheduleActionMenuId(null);
+      setScheduleFeedback("Actividad eliminada del horario.", "success");
+    } catch (scheduleError) {
+      if (scheduleError instanceof Error) {
+        setScheduleFeedback(scheduleError.message, "error");
+      } else {
+        setScheduleFeedback("No se pudo eliminar la actividad.", "error");
+      }
+    } finally {
+      setDeletingScheduleActivityId(null);
+    }
   };
 
   const onOpenEditScheduleActivity = (activity: ScheduleActivity) => {
+    if (!scheduleCanEdit) {
+      setScheduleFeedback("Tu rol es de solo lectura en este horario.", "error");
+      return;
+    }
     setEditingScheduleId(activity.id);
     setScheduleFormTitle(activity.title);
     setScheduleFormDescription(activity.description);
@@ -2908,6 +3513,7 @@ export default function DashboardPage() {
     setPracticeSelectedOption(null);
     setPracticeWrittenAnswer("");
     setPracticeFeedbackStatus(null);
+    setGroupDraftQuestionKey(null);
   };
 
   const resolveCorrectOption = (question: ExamQuestion): "a" | "b" | "c" | "d" => {
@@ -3981,6 +4587,7 @@ export default function DashboardPage() {
   const onOpenProfileImageEditorFromSidebar = () => {
     setActive(isAdmin ? "profile" : "perfil");
     setUserMenuOpen(false);
+    setNotificationPanelOpen(false);
     onOpenProfileImageEditor();
   };
 
@@ -4391,6 +4998,10 @@ export default function DashboardPage() {
       setCourseFeedback(message, type);
       return;
     }
+    if (resourceType === "schedule") {
+      setScheduleFeedback(message, type);
+      return;
+    }
     setSalaFeedback(message, type);
   };
 
@@ -4510,15 +5121,19 @@ export default function DashboardPage() {
     }
     setCreatingPublicShareLink(true);
     try {
-      // Determinar si es exam, course o room.
+      // Determinar endpoint por tipo de recurso.
       const endpoint = shareTarget.resourceType === "exam" 
         ? `/api/v1/share-links/exams/${shareTarget.resourceId}`
         : shareTarget.resourceType === "course"
           ? `/api/v1/share-links/courses/${shareTarget.resourceId}`
+          : shareTarget.resourceType === "schedule"
+            ? `/api/v1/share-links/schedules/${shareTarget.resourceId}`
+            : shareTarget.resourceType === "sala"
+              ? `/api/v1/share-links/salas/${shareTarget.resourceId}`
           : null;
 
       if (!endpoint) {
-        setShareFeedback(shareTarget.resourceType, "Recurso no soportado para compartir enlace pÃºblico.", "error");
+        setShareFeedback(shareTarget.resourceType, "Recurso no soportado para compartir enlace público.", "error");
         return;
       }
 
@@ -4539,7 +5154,7 @@ export default function DashboardPage() {
        if (error instanceof Error) {
          setShareFeedback(shareTarget.resourceType, error.message, "error");
        } else {
-         setShareFeedback(shareTarget.resourceType, "Error al generar el enlace pÃºblico.", "error");
+         setShareFeedback(shareTarget.resourceType, "Error al generar el enlace público.", "error");
        }
     } finally {
       setCreatingPublicShareLink(false);
@@ -4668,19 +5283,14 @@ export default function DashboardPage() {
           canRenameExam: nextCanRenameExam,
         },
       );
-      setExamParticipants((current) =>
-        current.map((item) =>
-          item.userId === participant.userId
-            ? {
-                ...item,
-                role: nextRole,
-                canShare: nextCanShare,
-                canStartGroup: nextCanStartGroup,
-                canRenameExam: nextCanRenameExam,
-              }
-            : item,
-        ),
+      const refreshedParticipantsPayload = await fetchJson(
+        `/api/v1/ia/exams/${examParticipantsTarget.id}/participants?userId=${user.id}`,
+        user.token,
       );
+      const refreshedParticipants = Array.isArray(refreshedParticipantsPayload)
+        ? refreshedParticipantsPayload.filter((item) => isExamParticipantPayload(item))
+        : [];
+      setExamParticipants(refreshedParticipants);
       await refreshExams();
       setExamFeedback("Permisos del participante actualizados.", "success");
     } catch (updateError) {
@@ -4780,6 +5390,42 @@ export default function DashboardPage() {
     }
   };
 
+  const onMarkAllNotificationsAsRead = async () => {
+    if (!user || markingAllNotifications || notificationActionLoadingId != null) {
+      return;
+    }
+    const unreadNotifications = homeShareNotifications.filter((notification) => !notification.readAt);
+    if (unreadNotifications.length === 0) {
+      return;
+    }
+
+    setMarkingAllNotifications(true);
+    try {
+      await Promise.allSettled(
+        unreadNotifications.map((notification) =>
+          patchJson(`/api/v1/share-links/notifications/${notification.id}/read?userId=${user.id}`, user.token, {}),
+        ),
+      );
+      await loadHomeShareNotifications();
+      if (active === "notificaciones") {
+        const notificationsPayload = await fetchJson(`/api/v1/share-links/notifications?userId=${user.id}`, user.token);
+        setPayload(
+          Array.isArray(notificationsPayload)
+            ? notificationsPayload.filter((item) => isShareNotificationPayload(item))
+            : [],
+        );
+      }
+    } catch (markAllError) {
+      if (markAllError instanceof Error) {
+        setError(markAllError.message);
+      } else {
+        setError("No se pudieron marcar todas las notificaciones como leidas.");
+      }
+    } finally {
+      setMarkingAllNotifications(false);
+    }
+  };
+
   const onAcceptNotificationInvitation = async (notification: ShareNotificationItem) => {
     if (!user || notificationActionLoadingId != null) {
       return;
@@ -4867,6 +5513,38 @@ export default function DashboardPage() {
         setError("No se pudo abrir el examen invitado.");
       }
       return;
+    }
+
+    if (resourceType === "schedule") {
+      if (notification.token && notification.token.trim()) {
+        if (!notification.readAt) {
+          await onMarkNotificationAsRead(notification);
+        }
+        router.push(`/dashboard?share=${encodeURIComponent(notification.token.trim())}`);
+        return;
+      }
+      if (Number.isFinite(notification.resourceId) && notification.resourceId > 0) {
+        try {
+          if (!notification.readAt) {
+            await onMarkNotificationAsRead(notification);
+          }
+          setSchedulePreferredProfileId(notification.resourceId);
+          const scheduleModule = await fetchJson(
+            `/api/v1/schedules?userId=${user.id}&scheduleId=${notification.resourceId}`,
+            user.token,
+          );
+          setPayload(scheduleModule);
+          setActive("horarios");
+          setScheduleFeedback(
+            notification.message?.trim() || "Horario compartido listo en tu modulo de horarios.",
+            "success",
+          );
+          return;
+        } catch {
+          setError("No se pudo abrir el horario compartido.");
+          return;
+        }
+      }
     }
 
     if (!notification.token || !notification.token.trim()) {
@@ -6259,9 +6937,9 @@ export default function DashboardPage() {
             "error",
           );
         } else if (rawMessage.toLowerCase().includes("no hay repaso grupal creado")) {
-          // BUGFIX: Si el usuario dueÃ±o hace click en "Regresar al repaso" luego de 20s de inactividad,
-          // el backend mata la sesiÃ³n por timeout y devuelve este error. Si el usuario es quien puede iniciar grupos,
-          // re-creamos la sesiÃ³n automÃ¡ticamente.
+          // BUGFIX: Si el usuario dueño hace click en "Regresar al repaso" luego de 20s de inactividad,
+          // el backend mata la sesión por timeout y devuelve este error. Si el usuario es quien puede iniciar grupos,
+          // re-creamos la sesión automáticamente.
           const isCreator =
             exam.groupPracticeCreatedByUserId === user.id ||
             exam.accessRole === "owner" ||
@@ -6363,13 +7041,26 @@ export default function DashboardPage() {
     }
     const submitQuestionKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${currentQuestion.id}`;
     const writtenAnswer = practiceWrittenAnswer.trim();
+    const hasDraftForCurrentQuestion = groupDraftQuestionKey === submitQuestionKey;
+    const selectedOptionForCurrentQuestion =
+      currentQuestion.questionType === "multiple_choice" && hasDraftForCurrentQuestion
+        ? practiceSelectedOption
+        : null;
+    const writtenAnswerForCurrentQuestion =
+      currentQuestion.questionType === "multiple_choice"
+        ? ""
+        : hasDraftForCurrentQuestion
+          ? writtenAnswer
+          : "";
     const submittedHasContent =
-      currentQuestion.questionType === "multiple_choice" ? Boolean(practiceSelectedOption) : Boolean(writtenAnswer);
-    if (!forceSubmit && currentQuestion.questionType === "multiple_choice" && !practiceSelectedOption) {
+      currentQuestion.questionType === "multiple_choice"
+        ? Boolean(selectedOptionForCurrentQuestion)
+        : Boolean(writtenAnswerForCurrentQuestion);
+    if (!forceSubmit && currentQuestion.questionType === "multiple_choice" && !selectedOptionForCurrentQuestion) {
       setExamFeedback("Selecciona una opcion para responder en grupo.", "error");
       return;
     }
-    if (!forceSubmit && currentQuestion.questionType !== "multiple_choice" && !writtenAnswer) {
+    if (!forceSubmit && currentQuestion.questionType !== "multiple_choice" && !writtenAnswerForCurrentQuestion) {
       setExamFeedback("Escribe una respuesta para continuar.", "error");
       return;
     }
@@ -6380,8 +7071,9 @@ export default function DashboardPage() {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
         questionId: currentQuestion.id,
-        selectedOption: currentQuestion.questionType === "multiple_choice" ? practiceSelectedOption : null,
-        writtenAnswer: currentQuestion.questionType === "multiple_choice" ? null : writtenAnswer || null,
+        selectedOption: currentQuestion.questionType === "multiple_choice" ? selectedOptionForCurrentQuestion : null,
+        writtenAnswer:
+          currentQuestion.questionType === "multiple_choice" ? null : writtenAnswerForCurrentQuestion || null,
       })) as ExamGroupState;
       let resolvedState: ExamGroupState = state;
       setGroupPracticeState((previousState) => {
@@ -6597,6 +7289,21 @@ export default function DashboardPage() {
     persistCurrentPracticeDraft(nextIndex, nextResults);
   };
 
+  const restartCurrentPracticeTimer = () => {
+    const question = currentPracticeQuestion;
+    if (!question) {
+      return;
+    }
+    setPracticeChronoSeconds(0);
+    const isTimerEnabled = question.timerEnabled !== false;
+    const rawTimeLimit = Number(question.temporizadorSegundos ?? 0);
+    if (isTimerEnabled && Number.isFinite(rawTimeLimit) && rawTimeLimit > 0) {
+      setPracticeRemainingSeconds(rawTimeLimit);
+    } else {
+      setPracticeRemainingSeconds(null);
+    }
+  };
+
   useEffect(() => {
     if (!showPracticeRunnerModal || practiceFinished || !currentPracticeQuestion) {
       return;
@@ -6704,12 +7411,89 @@ export default function DashboardPage() {
     }
 
     if (practiceProgressMode === "repeat_until_correct" && practiceFeedbackStatus !== "correct") {
+      restartCurrentPracticeTimer();
       resetPracticeInputState();
       return;
     }
 
     moveToNextPracticeStep(practiceResults);
   };
+
+  useEffect(() => {
+    const currentPracticeType = (currentPracticeQuestion?.questionType ?? "").toLowerCase();
+    const currentGroupType = (groupPracticeState?.currentQuestion?.questionType ?? "").toLowerCase();
+
+    const canSubmitIndividualWithEnter =
+      showPracticeRunnerModal &&
+      !practiceFinished &&
+      practiceFeedbackStatus == null &&
+      currentPracticeType === "multiple_choice";
+    const canSubmitGroupWithEnter =
+      showGroupPracticeRunnerModal &&
+      groupPracticeState?.status === "active" &&
+      groupAutoAdvanceSecondsLeft == null &&
+      !submittingGroupAnswer &&
+      currentGroupType === "multiple_choice";
+
+    if (!canSubmitIndividualWithEnter && !canSubmitGroupWithEnter) {
+      return;
+    }
+
+    const handleEnterToSubmit = (event: KeyboardEvent) => {
+      if (event.key !== "Enter" || event.repeat) {
+        return;
+      }
+
+      const target = event.target as HTMLElement | null;
+      if (target?.isContentEditable) {
+        return;
+      }
+      if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+        return;
+      }
+      if (target instanceof HTMLInputElement && target.type !== "radio") {
+        return;
+      }
+
+      if (canSubmitGroupWithEnter) {
+        const currentGroupQuestionKey = buildGroupQuestionKey(groupPracticeState ?? null);
+        const hasCurrentDraftSelection =
+          currentGroupQuestionKey != null &&
+          groupDraftQuestionKey === currentGroupQuestionKey &&
+          Boolean(practiceSelectedOption);
+        if (!hasCurrentDraftSelection) {
+          return;
+        }
+        event.preventDefault();
+        void onSubmitGroupPracticeStep();
+        return;
+      }
+
+      if (canSubmitIndividualWithEnter) {
+        if (!practiceSelectedOption) {
+          return;
+        }
+        event.preventDefault();
+        onSubmitPracticeStep();
+      }
+    };
+
+    window.addEventListener("keydown", handleEnterToSubmit);
+    return () => window.removeEventListener("keydown", handleEnterToSubmit);
+  }, [
+    currentPracticeQuestion?.questionType,
+    groupPracticeState,
+    groupAutoAdvanceSecondsLeft,
+    groupDraftQuestionKey,
+    onSubmitGroupPracticeStep,
+    onSubmitPracticeStep,
+    practiceFeedbackStatus,
+    practiceFinished,
+    practiceSelectedOption,
+    showGroupPracticeRunnerModal,
+    showPracticeRunnerModal,
+    submittingGroupAnswer,
+  ]);
 
   const onClosePracticeRunner = () => {
     if (selectedExam && !practiceFinished) {
@@ -6820,29 +7604,9 @@ export default function DashboardPage() {
             user.token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, state));
-
-          // Si estoy en una sesion finalizada, intentar detectar y migrar a la sesion activa mas reciente.
-          if ((state.status ?? "").toLowerCase() === "finished") {
-            try {
-              const latestState = (await postJson(
-                `/api/v1/ia/exams/${examId}/practice/group/join`,
-                user.token,
-                { userId: user.id },
-              )) as ExamGroupState;
-              if (latestState && latestState.sessionId !== state.sessionId) {
-                setGroupPracticeState((previous) => mergeGroupState(previous, latestState));
-                setGroupTimerExpired(false);
-                resetPracticeInputState();
-                setGroupAutoSubmitKey(null);
-                setPracticeFeedbackStatus(null);
-              }
-            } catch {
-              // silencio: no hay sesion activa para migrar
-            }
-          }
         } catch {
-          // Si el backend rechaza el sessionId (sesiÃ³n cerrada/reiniciada por admin),
-          // hacer un join para obtener la sesiÃ³n activa mÃ¡s reciente y redirigir
+          // Si el backend rechaza el sessionId (sesión cerrada/reiniciada por admin),
+          // hacer un join para obtener la sesión activa más reciente y redirigir
           try {
             const latestState = (await postJson(
               `/api/v1/ia/exams/${examId}/practice/group/join`,
@@ -6850,7 +7614,7 @@ export default function DashboardPage() {
               { userId: user.id },
             )) as ExamGroupState;
             if (latestState && latestState.sessionId !== sessionId) {
-              // Nueva sesiÃ³n detectada: redirigir al usuario a la sala de espera
+              // Nueva sesión detectada: redirigir al usuario a la sala de espera
               setGroupPracticeState((previous) => mergeGroupState(previous, latestState));
               setGroupTimerExpired(false);
               resetPracticeInputState();
@@ -6993,6 +7757,7 @@ export default function DashboardPage() {
     setPracticeWrittenAnswer("");
     setPracticeFeedbackStatus(null);
     setGroupSubmittedQuestionKey(null);
+    setGroupDraftQuestionKey(null);
   }, [
     showGroupPracticeRunnerModal,
     groupPracticeState?.sessionId,
@@ -7010,6 +7775,7 @@ export default function DashboardPage() {
     if (status === "waiting" || status === "finished") {
       setGroupAnswersByQuestionKey({});
       setGroupSubmittedQuestionKey(null);
+      setGroupDraftQuestionKey(null);
       groupInputQuestionKeyRef.current = null;
     }
   }, [
@@ -7033,7 +7799,7 @@ export default function DashboardPage() {
       return;
     }
 
-    // Marcar cronÃ³metro como expirado para mostrar resultados
+    // Marcar cronómetro como expirado para mostrar resultados
     setGroupTimerExpired(true);
     setGroupTimerExpiredQuestionKey(questionKey);
 
@@ -7142,12 +7908,12 @@ export default function DashboardPage() {
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, freshState));
         } catch {
-          // silencio: el polling principal seguirÃ¡ intentando.
+          // silencio: el polling principal seguirá intentando.
         }
       })();
     };
 
-    // Forzar un refresh inmediato al entrar a revisiÃ³n para no mostrar snapshots viejos.
+    // Forzar un refresh inmediato al entrar a revisión para no mostrar snapshots viejos.
     if (isNewReviewWindow) {
       refreshReviewState();
     }
@@ -7576,8 +8342,11 @@ export default function DashboardPage() {
     setSalaRemoteLastCommand("");
   };
 
-  const onCreateSala = (event: FormEvent<HTMLFormElement>) => {
+  const onCreateSala = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (!user) {
+      return;
+    }
     const normalizedName = newSalaName.trim();
     if (!normalizedName) {
       return;
@@ -7588,40 +8357,37 @@ export default function DashboardPage() {
       return;
     }
 
+    const finalName = normalizedName.toUpperCase().startsWith("SALA ")
+      ? normalizedName.toUpperCase()
+      : `SALA ${normalizedName.toUpperCase()}`;
     const normalizedDescription = newSalaDescription.trim();
-    setSalasData((current) => {
-      const codeExists = current.some((room) => (room.code ?? "").toUpperCase() === normalizedCode);
-      if (codeExists) {
-        setSalaFeedback("El codigo de sala ya existe. Usa otro codigo unico.", "error");
-        return current;
-      }
-      const nextId = current.reduce((maxId, sala) => Math.max(maxId, sala.id), 0) + 1;
-      const finalName = normalizedName.toUpperCase().startsWith("SALA ")
-        ? normalizedName.toUpperCase()
-        : `SALA ${normalizedName.toUpperCase()}`;
-      return [
-        {
-          id: nextId,
-          name: finalName,
-          code: normalizedCode,
-          visibility: newSalaVisibility,
-          description: normalizedDescription || "Nueva sala creada para coordinacion y estudio.",
-          imageData: newSalaImageData?.trim() ? newSalaImageData.trim() : null,
-          participants: [{ id: nextId * 1000 + 1, name: "Tu", micOn: false, isScreenSharing: false }],
-          messages: [],
-        },
-        ...current,
-      ];
-    });
+    try {
+      const createdRoom = (await postJson("/api/v1/salas", user.token, {
+        userId: user.id,
+        name: finalName,
+        code: normalizedCode,
+        visibility: newSalaVisibility,
+        description: normalizedDescription || "Nueva sala creada para coordinacion y estudio.",
+        imageData: newSalaImageData?.trim() ? newSalaImageData.trim() : null,
+      })) as { id?: number };
 
-    setNewSalaName("");
-    setNewSalaCode("");
-    setNewSalaVisibility("public");
-    setNewSalaDescription("");
-    setNewSalaImageData(null);
-    setNewSalaImageName("");
-    setShowCreateSalaModal(false);
-    setSalaFeedback("Sala creada correctamente.", "success");
+      await reloadSalas(typeof createdRoom.id === "number" ? createdRoom.id : undefined);
+
+      setNewSalaName("");
+      setNewSalaCode("");
+      setNewSalaVisibility("public");
+      setNewSalaDescription("");
+      setNewSalaImageData(null);
+      setNewSalaImageName("");
+      setShowCreateSalaModal(false);
+      setSalaFeedback("Sala creada correctamente.", "success");
+    } catch (salaError) {
+      if (salaError instanceof Error) {
+        setSalaFeedback(salaError.message, "error");
+      } else {
+        setSalaFeedback("No se pudo crear la sala.", "error");
+      }
+    }
   };
 
   const onOpenEditSala = (room: SalaItem) => {
@@ -7636,9 +8402,9 @@ export default function DashboardPage() {
     setSalaActionMenuId(null);
   };
 
-  const onSaveSalaEdit = (event: FormEvent<HTMLFormElement>) => {
+  const onSaveSalaEdit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (editingSalaId == null) {
+    if (editingSalaId == null || !user) {
       return;
     }
     const normalizedName = editSalaName.trim();
@@ -7651,99 +8417,101 @@ export default function DashboardPage() {
       return;
     }
     const normalizedDescription = editSalaDescription.trim();
-    setSalasData((current) => {
-      const codeExists = current.some(
-        (room) => room.id !== editingSalaId && (room.code ?? "").toUpperCase() === normalizedCode,
-      );
-      if (codeExists) {
-        setSalaFeedback("El codigo de sala ya existe. Usa otro codigo unico.", "error");
-        return current;
+    try {
+      await patchJson(`/api/v1/salas/${editingSalaId}`, user.token, {
+        userId: user.id,
+        name: normalizedName.toUpperCase().startsWith("SALA ")
+          ? normalizedName.toUpperCase()
+          : `SALA ${normalizedName.toUpperCase()}`,
+        code: normalizedCode,
+        visibility: editSalaVisibility,
+        description: normalizedDescription || "Sala actualizada para coordinacion y estudio.",
+        imageData: editSalaImageData?.trim() ? editSalaImageData.trim() : null,
+      });
+
+      await reloadSalas(editingSalaId);
+      setShowEditSalaModal(false);
+      setEditingSalaId(null);
+      setEditSalaName("");
+      setEditSalaCode("");
+      setEditSalaVisibility("public");
+      setEditSalaDescription("");
+      setEditSalaImageData(null);
+      setEditSalaImageName("");
+      setSalaFeedback("Sala actualizada correctamente.", "success");
+    } catch (salaError) {
+      if (salaError instanceof Error) {
+        setSalaFeedback(salaError.message, "error");
+      } else {
+        setSalaFeedback("No se pudo actualizar la sala.", "error");
       }
-      return current.map((sala) =>
-        sala.id === editingSalaId
-          ? {
-              ...sala,
-              name: normalizedName.toUpperCase().startsWith("SALA ")
-                ? normalizedName.toUpperCase()
-                : `SALA ${normalizedName.toUpperCase()}`,
-              code: normalizedCode,
-              visibility: editSalaVisibility,
-              description: normalizedDescription || "Sala actualizada para coordinacion y estudio.",
-              imageData: editSalaImageData?.trim() ? editSalaImageData.trim() : null,
-            }
-          : sala,
-      );
-    });
-    setShowEditSalaModal(false);
-    setEditingSalaId(null);
-    setEditSalaName("");
-    setEditSalaCode("");
-    setEditSalaVisibility("public");
-    setEditSalaDescription("");
-    setEditSalaImageData(null);
-    setEditSalaImageName("");
-    setSalaFeedback("Sala actualizada correctamente.", "success");
+    }
   };
 
-  const onDeleteSala = () => {
-    if (!deleteSalaTarget) {
+  const onDeleteSala = async () => {
+    if (!deleteSalaTarget || !user) {
       return;
     }
     const deleteSalaId = deleteSalaTarget.id;
-    setSalasData((current) => current.filter((sala) => sala.id !== deleteSalaId));
-    setDeleteSalaTarget(null);
-    setSalaActionMenuId(null);
-    setSelectedSalaId((current) => (current === deleteSalaId ? null : current));
-    if (selectedSalaId === deleteSalaId) {
-      setSalasSharedScreensOpen(true);
-      setSalaDraftMessage("");
-      setSalaPinnedScreenParticipantId(null);
-      setSalaMaximizedScreenParticipantId(null);
-      setSalaPinnedZoom(1);
-      setSalaPinnedPanX(0);
-      setSalaPinnedPanY(0);
-      setSalaMaxZoom(1);
-      setSalaMaxPanX(0);
-      setSalaMaxPanY(0);
-      setSalaControlRequestPending(false);
-      setSalaControlRequestTargetId(null);
-      setSalaControlGrantedParticipantId(null);
-      setSalaRemotePointerX(50);
-      setSalaRemotePointerY(50);
-      setSalaRemoteInputDraft("");
-      setSalaRemoteLastCommand("");
+    try {
+      await deleteJson(`/api/v1/salas/${deleteSalaId}?userId=${user.id}`, user.token);
+      setDeleteSalaTarget(null);
+      setSalaActionMenuId(null);
+      setSelectedSalaId((current) => (current === deleteSalaId ? null : current));
+      if (selectedSalaId === deleteSalaId) {
+        setSalasSharedScreensOpen(true);
+        setSalaDraftMessage("");
+        setSalaPinnedScreenParticipantId(null);
+        setSalaMaximizedScreenParticipantId(null);
+        setSalaPinnedZoom(1);
+        setSalaPinnedPanX(0);
+        setSalaPinnedPanY(0);
+        setSalaMaxZoom(1);
+        setSalaMaxPanX(0);
+        setSalaMaxPanY(0);
+        setSalaControlRequestPending(false);
+        setSalaControlRequestTargetId(null);
+        setSalaControlGrantedParticipantId(null);
+        setSalaRemotePointerX(50);
+        setSalaRemotePointerY(50);
+        setSalaRemoteInputDraft("");
+        setSalaRemoteLastCommand("");
+      }
+
+      const nextPreferredSalaId = selectedSalaId === deleteSalaId ? undefined : selectedSalaId ?? undefined;
+      await reloadSalas(nextPreferredSalaId);
+      setSalaFeedback("Sala eliminada.", "success");
+    } catch (salaError) {
+      if (salaError instanceof Error) {
+        setSalaFeedback(salaError.message, "error");
+      } else {
+        setSalaFeedback("No se pudo eliminar la sala.", "error");
+      }
     }
-    setSalaFeedback("Sala eliminada.", "success");
   };
 
-  const onSendSalaMessage = (event: FormEvent<HTMLFormElement>) => {
+  const onSendSalaMessage = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = salaDraftMessage.trim();
-    if (!text || selectedSalaId == null) {
+    if (!text || selectedSalaId == null || !user) {
       return;
     }
 
-    setSalasData((current) =>
-      current.map((sala) => {
-        if (sala.id !== selectedSalaId) {
-          return sala;
-        }
-        return {
-          ...sala,
-          messages: [
-            ...sala.messages,
-            {
-              id: Date.now(),
-              sender: "Tu",
-              content: text,
-              isCurrentUser: true,
-            },
-          ],
-        };
-      }),
-    );
-    setSalaDraftMessage("");
-    setSalasChatOpen(true);
+    try {
+      await postJson(`/api/v1/salas/${selectedSalaId}/messages`, user.token, {
+        userId: user.id,
+        content: text,
+      });
+      await reloadSalas(selectedSalaId);
+      setSalaDraftMessage("");
+      setSalasChatOpen(true);
+    } catch (salaError) {
+      if (salaError instanceof Error) {
+        setSalaFeedback(salaError.message, "error");
+      } else {
+        setSalaFeedback("No se pudo enviar el mensaje.", "error");
+      }
+    }
   };
 
   const onToggleMySalaScreenShare = () => {
@@ -8417,10 +9185,6 @@ export default function DashboardPage() {
     }
 
     if (active === "inicio") {
-      const unreadCount = homeShareNotifications.reduce(
-        (count, notification) => (!notification.readAt ? count + 1 : count),
-        0,
-      );
       return (
         <div className="grid gap-4 xl:grid-cols-3">
           <div className="grid gap-4 md:grid-cols-2 xl:col-span-2">
@@ -8444,7 +9208,7 @@ export default function DashboardPage() {
               </div>
             </DataCard>
           </div>
-          <DataCard title={`Notificaciones${unreadCount > 0 ? ` (${unreadCount} nuevas)` : ""}`}>
+          <DataCard title={`Notificaciones${unreadNotificationsCount > 0 ? ` (${unreadNotificationsCount} nuevas)` : ""}`}>
             <div className="space-y-2">
               <p className="text-xs text-slate-600">
                 Aqui llegan tus invitaciones. Puedes aceptarlas sin salir de Inicio.
@@ -8465,6 +9229,8 @@ export default function DashboardPage() {
                         ? "Examen"
                         : notification.resourceType === "course"
                           ? "Curso"
+                          : notification.resourceType === "schedule"
+                            ? "Horario"
                           : notification.resourceType === "sala"
                             ? "Sala"
                             : "Recurso";
@@ -10713,6 +11479,10 @@ export default function DashboardPage() {
         const myCurrentAnswerByMap = user
           ? currentQuestionAnswerByUserId.get(normalizeGroupUserKey(user.id))
           : null;
+        const hasCurrentLocalDraft =
+          currentGroupQuestionKey != null && groupDraftQuestionKey === currentGroupQuestionKey;
+        const effectivePracticeSelectedOption = hasCurrentLocalDraft ? practiceSelectedOption : null;
+        const effectivePracticeWrittenAnswer = hasCurrentLocalDraft ? practiceWrittenAnswer : "";
         const myAnsweredByCurrentData = Boolean((myCurrentAnswerByMap?.selectedAnswer ?? "").trim());
         const myAnswered =
           myAnsweredByCurrentData ||
@@ -10799,7 +11569,7 @@ export default function DashboardPage() {
                 <div className="space-y-3">
                   {groupPracticeState.status === "waiting" ? (
                     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                      <p className="text-sm text-slate-700">Sala grupal en espera. Cuando estÃ©n listos, inicia el repaso.</p>
+                      <p className="text-sm text-slate-700">Sala grupal en espera. Cuando estén listos, inicia el repaso.</p>
                       <div className="mt-3">
                         <div className="flex flex-wrap items-center gap-2">
                           <button
@@ -10919,8 +11689,8 @@ export default function DashboardPage() {
                                 });
 
                                 const myResolvedOptionKey = (() => {
-                                  if (practiceSelectedOption) {
-                                    return practiceSelectedOption;
+                                  if (effectivePracticeSelectedOption) {
+                                    return effectivePracticeSelectedOption;
                                   }
                                   const selectedOptionKey = (myCurrentAnswer?.selectedOptionKey ?? "").toLowerCase();
                                   if (selectedOptionKey === "a" || selectedOptionKey === "b" || selectedOptionKey === "c" || selectedOptionKey === "d") {
@@ -10965,8 +11735,11 @@ export default function DashboardPage() {
                                       type="radio"
                                       name="group_practice_option"
                                       value={key}
-                                      checked={practiceSelectedOption === key}
-                                      onChange={() => setPracticeSelectedOption(key)}
+                                      checked={effectivePracticeSelectedOption === key}
+                                      onChange={() => {
+                                        setPracticeSelectedOption(key);
+                                        setGroupDraftQuestionKey(currentGroupQuestionKey);
+                                      }}
                                       disabled={myAnswered || submittingGroupAnswer}
                                     />
                                     <span>{value}</span>
@@ -11023,8 +11796,11 @@ export default function DashboardPage() {
                           {groupAutoAdvanceSecondsLeft == null ? (
                             <div className="space-y-2">
                               <textarea
-                                value={practiceWrittenAnswer}
-                                onChange={(event) => setPracticeWrittenAnswer(event.target.value)}
+                                value={effectivePracticeWrittenAnswer}
+                                onChange={(event) => {
+                                  setPracticeWrittenAnswer(event.target.value);
+                                  setGroupDraftQuestionKey(currentGroupQuestionKey);
+                                }}
                                 placeholder="Tu respuesta grupal"
                                 disabled={myAnswered || submittingGroupAnswer}
                                 className="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400 disabled:bg-slate-100"
@@ -11715,6 +12491,7 @@ export default function DashboardPage() {
                   const canEditQuestions = item.canEditQuestions ?? (accessRole === "owner" || accessRole === "editor");
                   const canEditSettings = item.canEditSettings ?? canEditQuestions;
                   const canShareExam = item.canShare ?? accessRole === "owner";
+                  const canStartGroupExam = item.canStartGroup ?? accessRole === "owner";
                   const canRenameExam = item.canRenameExam ?? accessRole === "owner";
                   const isOwner = accessRole === "owner";
                   const visibility = (item.visibility ?? "private").toLowerCase() === "public" ? "public" : "private";
@@ -11726,18 +12503,12 @@ export default function DashboardPage() {
                   const groupSessionActive = groupPracticeStatus === "waiting" || groupPracticeStatus === "active";
                   const isGroupCreator = (item.groupPracticeCreatedByUserId ?? 0) === (user?.id ?? 0);
                   const ownerUserId = item.ownerUserId ?? null;
-                  const waitingRoomCreatedByOwner =
-                    groupPracticeStatus === "waiting" &&
-                    item.groupPracticeSessionId != null &&
-                    ownerUserId != null &&
-                    item.groupPracticeCreatedByUserId != null &&
-                    item.groupPracticeCreatedByUserId === ownerUserId;
                   const hasEditPermissions = canEditQuestions || canEditSettings;
-                  const isReadOnlyParticipant = !isOwner && !hasEditPermissions;
                   const hasOpenGroupSession = groupSessionActive && item.groupPracticeSessionId != null;
-                  const showGroupPracticeButton =
-                    isOwner || (isReadOnlyParticipant ? hasOpenGroupSession : waitingRoomCreatedByOwner);
-                  const groupPracticeButtonLabel = isReadOnlyParticipant ? "Unirse" : "Grupal";
+                  const canStartGroupPractice = isOwner || canStartGroupExam;
+                  const canJoinGroupPractice = hasOpenGroupSession;
+                  const showGroupPracticeButton = canStartGroupPractice || canJoinGroupPractice;
+                  const groupPracticeButtonLabel = canStartGroupPractice ? "Grupal" : "Unirse";
                   return (
                   <article key={item.id} className="rounded-lg border border-slate-300 bg-slate-50 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -11853,7 +12624,7 @@ export default function DashboardPage() {
                           type="button"
                           onClick={() => {
                             setPracticeOriginSection("examenes");
-                            if (isOwner) {
+                            if (canStartGroupPractice) {
                               if (groupSessionActive) {
                                 void onJoinGroupPractice(item);
                               } else {
@@ -11861,7 +12632,9 @@ export default function DashboardPage() {
                               }
                               return;
                             }
-                            void onJoinGroupPractice(item);
+                            if (canJoinGroupPractice) {
+                              void onJoinGroupPractice(item);
+                            }
                           }}
                           disabled={groupPracticeLoading}
                           className="inline-flex items-center gap-2 rounded-lg bg-[#1E40AF] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1E3A8A] disabled:cursor-not-allowed disabled:opacity-60"
@@ -12668,14 +13441,11 @@ export default function DashboardPage() {
                   selectedExam.accessRole ?? ((selectedExam.ownerUserId ?? 0) === (user?.id ?? 0) ? "owner" : "viewer")
                 ).toLowerCase();
                 const selectedIsOwner = selectedAccessRole === "owner";
+                const selectedCanStartGroup = selectedExam.canStartGroup ?? selectedIsOwner;
                 const selectedGroupPracticeStatus = (selectedExam.groupPracticeStatus ?? "").toLowerCase();
-                const selectedWaitingRoomCreatedByOwner =
-                  selectedGroupPracticeStatus === "waiting" &&
-                  selectedExam.groupPracticeSessionId != null &&
-                  selectedExam.ownerUserId != null &&
-                  selectedExam.groupPracticeCreatedByUserId != null &&
-                  selectedExam.groupPracticeCreatedByUserId === selectedExam.ownerUserId;
-                const canChooseGroupPractice = selectedIsOwner || selectedWaitingRoomCreatedByOwner;
+                const selectedGroupSessionActive =
+                  selectedGroupPracticeStatus === "waiting" || selectedGroupPracticeStatus === "active";
+                const canChooseGroupPractice = Boolean(selectedCanStartGroup) || selectedGroupSessionActive;
 
                 return (
                   <>
@@ -12722,11 +13492,8 @@ export default function DashboardPage() {
                   type="button"
                   onClick={() => {
                     if (practiceIntent !== "restart" && (selectedExam.participantsCount ?? 1) > 1 && practiceStartMode === "group") {
-                      if (selectedIsOwner) {
-                        const groupSessionActive =
-                          selectedGroupPracticeStatus === "waiting" ||
-                          selectedGroupPracticeStatus === "active";
-                        if (groupSessionActive && selectedExam.groupPracticeSessionId != null) {
+                      if (selectedCanStartGroup) {
+                        if (selectedGroupSessionActive && selectedExam.groupPracticeSessionId != null) {
                           void onJoinGroupPractice(selectedExam);
                         } else {
                           void onCreateGroupPractice(selectedExam);
@@ -13098,30 +13865,36 @@ export default function DashboardPage() {
                           </button>
                           {salaActionMenuId === room.id ? (
                             <div className="absolute right-0 z-20 mt-2 w-40 rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-                              <button
-                                type="button"
-                                onClick={() => onOpenEditSala(room)}
-                                className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
-                              >
-                                Editar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDeleteSalaTarget(room);
-                                  setSalaActionMenuId(null);
-                                }}
-                                className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-rose-700 hover:bg-rose-50"
-                              >
-                                Eliminar
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => onOpenShareModal("sala", room.id, room.name)}
-                                className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
-                              >
-                                Compartir
-                              </button>
+                              {room.canEdit !== false ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => onOpenEditSala(room)}
+                                    className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
+                                  >
+                                    Editar
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setDeleteSalaTarget(room);
+                                      setSalaActionMenuId(null);
+                                    }}
+                                    className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-rose-700 hover:bg-rose-50"
+                                  >
+                                    Eliminar
+                                  </button>
+                                </>
+                              ) : null}
+                              {room.canShare === true ? (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenShareModal("sala", room.id, room.name)}
+                                  className="flex w-full items-center rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
+                                >
+                                  Compartir
+                                </button>
+                              ) : null}
                             </div>
                           ) : null}
                         </div>
@@ -14205,7 +14978,7 @@ export default function DashboardPage() {
       return (
         <div className="w-full space-y-4">
           <DataCard title="Notificaciones">
-            <p className="text-sm text-slate-600">Aqui recibes recursos compartidos (examenes, cursos o salas).</p>
+            <p className="text-sm text-slate-600">Aqui recibes recursos compartidos (examenes, cursos, horarios o salas).</p>
 
             <div className="mt-3 space-y-2">
               {notifications.length === 0 ? (
@@ -14234,6 +15007,8 @@ export default function DashboardPage() {
                       ? "Examen"
                       : notification.resourceType === "course"
                         ? "Curso"
+                        : notification.resourceType === "schedule"
+                          ? "Horario"
                         : notification.resourceType === "sala"
                           ? "Sala"
                           : "Recurso";
@@ -14525,9 +15300,14 @@ export default function DashboardPage() {
           <div className="flex justify-end">
             <button
               type="submit"
-              className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88]"
+              disabled={savingScheduleActivity}
+              className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {editingScheduleId != null ? "Guardar cambios" : "Guardar actividad"}
+              {savingScheduleActivity
+                ? "Guardando..."
+                : editingScheduleId != null
+                  ? "Guardar cambios"
+                  : "Guardar actividad"}
             </button>
           </div>
         </form>
@@ -14535,39 +15315,88 @@ export default function DashboardPage() {
       return (
         <div className="w-full space-y-4">
           <DataCard title="Horarios">
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setScheduleViewMode("weekly")}
-                className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition ${
-                  scheduleViewMode === "weekly"
-                    ? "border-[#004aad] bg-[#004aad] text-white"
-                    : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                }`}
-              >
-                Vista semanal
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingScheduleId(null);
-                  setScheduleFormTitle("");
-                  setScheduleFormDescription("");
-                  setScheduleFormDay("monday");
-                  setScheduleFormStartTime("08:00");
-                  setScheduleFormEndTime("09:30");
-                  setScheduleFormLocation("");
-                  setScheduleFormColor("blue");
-                  setScheduleActionMenuId(null);
-                  setShowCreateScheduleModal(true);
-                }}
-                className="rounded-lg bg-[#004aad] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#003b88]"
-              >
-                Nueva actividad
-              </button>
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScheduleViewMode("weekly")}
+                  className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition ${
+                    scheduleViewMode === "weekly"
+                      ? "border-[#004aad] bg-[#004aad] text-white"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  Vista semanal
+                </button>
+                {scheduleCanEdit ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingScheduleId(null);
+                      setScheduleFormTitle("");
+                      setScheduleFormDescription("");
+                      setScheduleFormDay("monday");
+                      setScheduleFormStartTime("08:00");
+                      setScheduleFormEndTime("09:30");
+                      setScheduleFormLocation("");
+                      setScheduleFormColor("blue");
+                      setScheduleActionMenuId(null);
+                      setShowCreateScheduleModal(true);
+                    }}
+                    className="rounded-lg bg-[#004aad] px-3 py-1.5 text-sm font-semibold text-white hover:bg-[#003b88]"
+                  >
+                    Nueva actividad
+                  </button>
+                ) : null}
+                {scheduleCanShare && scheduleProfileId != null ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenShareModal("schedule", scheduleProfileId, scheduleProfileName)}
+                    className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                  >
+                    Compartir horario
+                  </button>
+                ) : null}
+              </div>
+              <div className="mx-auto w-full max-w-2xl">
+                <label className="mb-1 block text-center text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  Seleccionar horario
+                </label>
+                <select
+                  value={scheduleProfileSelectValue}
+                  onChange={onSelectScheduleProfile}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                  disabled={scheduleProfiles.length === 0}
+                >
+                  {scheduleProfiles.length === 0 ? (
+                    <option value="">Mi horario</option>
+                  ) : (
+                    scheduleProfiles.map((profile) => {
+                      const isOwner = user?.id != null && profile.ownerUserId === user.id;
+                      const roleLabel = (profile.accessRole?.trim() || "viewer").toUpperCase();
+                      const ownerLabel = isOwner
+                        ? "Mi horario"
+                        : profile.ownerName?.trim()
+                          ? `Compartido por ${profile.ownerName.trim()}`
+                          : "Compartido";
+                      return (
+                        <option key={profile.profileId} value={String(profile.profileId)}>
+                          {`${profile.profileName} - ${ownerLabel} - ${roleLabel}`}
+                        </option>
+                      );
+                    })
+                  )}
+                </select>
+              </div>
             </div>
             <p className="mt-3 text-sm text-slate-600">
               Organiza tus actividades con horas exactas (ejemplo 10:30 a 11:23).
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              Perfil: <span className="font-semibold text-slate-700">{scheduleProfileName || "Mi horario"}</span>{" "}
+              - Rol: <span className="font-semibold uppercase text-slate-700">{scheduleAccessRole || "owner"}</span>
+              {scheduleOwnerUserId != null && user?.id === scheduleOwnerUserId ? " - Propietario" : ""}
+              {!scheduleCanEdit ? " - Solo lectura" : ""}
             </p>
             {scheduleMessage ? (
               <p
@@ -14662,29 +15491,31 @@ export default function DashboardPage() {
                                               {singleActivity.location?.trim() || "Sin ubicacion"}
                                             </p>
                                           </div>
-                                          <button
-                                            type="button"
-                                            onClick={() =>
-                                              setScheduleActionMenuId((current) =>
-                                                current === singleActivity.id ? null : singleActivity.id,
-                                              )
-                                            }
-                                            aria-label={`Opciones de ${singleActivity.title}`}
-                                            className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-current hover:bg-white/50"
-                                          >
-                                            <svg
-                                              xmlns="http://www.w3.org/2000/svg"
-                                              viewBox="0 0 24 24"
-                                              fill="currentColor"
-                                              className="h-3.5 w-3.5"
+                                          {scheduleCanEdit ? (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                setScheduleActionMenuId((current) =>
+                                                  current === singleActivity.id ? null : singleActivity.id,
+                                                )
+                                              }
+                                              aria-label={`Opciones de ${singleActivity.title}`}
+                                              className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-current hover:bg-white/50"
                                             >
-                                              <circle cx="12" cy="5" r="1.8" />
-                                              <circle cx="12" cy="12" r="1.8" />
-                                              <circle cx="12" cy="19" r="1.8" />
-                                            </svg>
-                                          </button>
+                                              <svg
+                                                xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 24 24"
+                                                fill="currentColor"
+                                                className="h-3.5 w-3.5"
+                                              >
+                                                <circle cx="12" cy="5" r="1.8" />
+                                                <circle cx="12" cy="12" r="1.8" />
+                                                <circle cx="12" cy="19" r="1.8" />
+                                              </svg>
+                                            </button>
+                                          ) : null}
                                         </div>
-                                        {scheduleActionMenuId === singleActivity.id ? (
+                                        {scheduleCanEdit && scheduleActionMenuId === singleActivity.id ? (
                                           <div className="absolute right-0 z-30 mt-1 w-28 rounded-md border border-slate-200 bg-white p-1 text-slate-700 shadow-lg">
                                             <button
                                               type="button"
@@ -14695,10 +15526,11 @@ export default function DashboardPage() {
                                             </button>
                                             <button
                                               type="button"
-                                              onClick={() => onDeleteScheduleActivity(singleActivity.id)}
-                                              className="flex w-full items-center rounded px-2 py-1 text-left text-[11px] font-semibold text-rose-700 hover:bg-rose-50"
+                                              disabled={deletingScheduleActivityId === singleActivity.id}
+                                              onClick={() => void onDeleteScheduleActivity(singleActivity.id)}
+                                              className="flex w-full items-center rounded px-2 py-1 text-left text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                                             >
-                                              Eliminar
+                                              {deletingScheduleActivityId === singleActivity.id ? "Eliminando..." : "Eliminar"}
                                             </button>
                                           </div>
                                         ) : null}
@@ -14732,29 +15564,31 @@ export default function DashboardPage() {
                                                       {activity.location?.trim() || "Sin ubicacion"}
                                                     </p>
                                                   </div>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                      setScheduleActionMenuId((current) =>
-                                                        current === activity.id ? null : activity.id,
-                                                      )
-                                                    }
-                                                    aria-label={`Opciones de ${activity.title}`}
-                                                    className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-current hover:bg-white/50"
-                                                  >
-                                                    <svg
-                                                      xmlns="http://www.w3.org/2000/svg"
-                                                      viewBox="0 0 24 24"
-                                                      fill="currentColor"
-                                                      className="h-3.5 w-3.5"
+                                                  {scheduleCanEdit ? (
+                                                    <button
+                                                      type="button"
+                                                      onClick={() =>
+                                                        setScheduleActionMenuId((current) =>
+                                                          current === activity.id ? null : activity.id,
+                                                        )
+                                                      }
+                                                      aria-label={`Opciones de ${activity.title}`}
+                                                      className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-current hover:bg-white/50"
                                                     >
-                                                      <circle cx="12" cy="5" r="1.8" />
-                                                      <circle cx="12" cy="12" r="1.8" />
-                                                      <circle cx="12" cy="19" r="1.8" />
-                                                    </svg>
-                                                  </button>
+                                                      <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        viewBox="0 0 24 24"
+                                                        fill="currentColor"
+                                                        className="h-3.5 w-3.5"
+                                                      >
+                                                        <circle cx="12" cy="5" r="1.8" />
+                                                        <circle cx="12" cy="12" r="1.8" />
+                                                        <circle cx="12" cy="19" r="1.8" />
+                                                      </svg>
+                                                    </button>
+                                                  ) : null}
                                                 </div>
-                                                {scheduleActionMenuId === activity.id ? (
+                                                {scheduleCanEdit && scheduleActionMenuId === activity.id ? (
                                                   <div className="absolute right-0 z-30 mt-1 w-28 rounded-md border border-slate-200 bg-white p-1 text-slate-700 shadow-lg">
                                                     <button
                                                       type="button"
@@ -14765,10 +15599,11 @@ export default function DashboardPage() {
                                                     </button>
                                                     <button
                                                       type="button"
-                                                      onClick={() => onDeleteScheduleActivity(activity.id)}
-                                                      className="flex w-full items-center rounded px-2 py-1 text-left text-[11px] font-semibold text-rose-700 hover:bg-rose-50"
+                                                      disabled={deletingScheduleActivityId === activity.id}
+                                                      onClick={() => void onDeleteScheduleActivity(activity.id)}
+                                                      className="flex w-full items-center rounded px-2 py-1 text-left text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
                                                     >
-                                                      Eliminar
+                                                      {deletingScheduleActivityId === activity.id ? "Eliminando..." : "Eliminar"}
                                                     </button>
                                                   </div>
                                                 ) : null}
@@ -15572,8 +16407,8 @@ export default function DashboardPage() {
         ) : null}
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="flex items-center justify-between bg-slate-900 px-5 py-3 text-white">
-            <div className="flex items-center gap-3">
+          <header className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 px-3 py-3 text-white sm:px-5">
+            <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
               <button
                 type="button"
                 onClick={() => setSidebarOpen((value) => !value)}
@@ -15592,31 +16427,23 @@ export default function DashboardPage() {
                 </svg>
               </button>
 
-              <Image src="/smartlearn.png" alt="SmartLearn" width={120} height={32} />
-              <span className="text-sm font-semibold uppercase tracking-wide">{active || "panel"}</span>
+              <Image src="/smartlearn.png" alt="SmartLearn" width={120} height={32} className="h-7 w-auto sm:h-8" />
+              <span className="hidden max-w-[10rem] truncate text-xs font-semibold uppercase tracking-wide md:inline lg:max-w-[14rem]">
+                {active || "panel"}
+              </span>
             </div>
 
-            <div className="relative">
+            <div className="ml-auto flex flex-wrap items-center justify-end gap-2 sm:flex-nowrap sm:gap-2.5">
               <button
                 type="button"
-                onClick={() => setUserMenuOpen((value) => !value)}
-                className="inline-flex items-center gap-2 rounded-md border border-white/20 bg-white/10 px-3 py-2 text-sm font-semibold uppercase tracking-wide text-white hover:bg-white/20"
+                onClick={() => {
+                  setShowTutorialModal(true);
+                  setNotificationPanelOpen(false);
+                  setUserMenuOpen(false);
+                }}
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-3 text-xs font-semibold uppercase tracking-wide leading-none text-cyan-100 transition-colors hover:bg-cyan-500/30 sm:h-11 sm:px-4 sm:text-sm"
+                title={`Ver tutorial de ${activeTutorialGuide.sectionTitle}`}
               >
-                <span className="relative h-7 w-7 overflow-hidden rounded-full border border-white/25 bg-white/20 text-xs font-bold text-white">
-                  {profileImageData ? (
-                    <img
-                      src={profileImageData}
-                      alt="Mi foto"
-                      className="absolute inset-0 h-full w-full object-cover"
-                      style={profileImagePreviewStyle}
-                    />
-                  ) : (
-                    <span className="flex h-full w-full items-center justify-center">
-                      {user.name.slice(0, 1).toUpperCase()}
-                    </span>
-                  )}
-                </span>
-                {user.username}
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
                   viewBox="0 0 24 24"
@@ -15625,97 +16452,295 @@ export default function DashboardPage() {
                   strokeWidth="2"
                   className="h-4 w-4"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+                  <circle cx="12" cy="12" r="9" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m10 9 5 3-5 3z" />
                 </svg>
+                <span className="hidden lg:inline">Tutorial</span>
               </button>
 
-              {userMenuOpen ? (
-                <div className="absolute right-0 top-11 z-30 w-48 rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
-                  <button
-                    type="button"
-                    onClick={onOpenProfileImageEditorFromSidebar}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNotificationPanelOpen((value) => !value);
+                    setUserMenuOpen(false);
+                  }}
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20 sm:h-11 sm:w-11"
+                  aria-label="Notificaciones"
+                  title="Notificaciones"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="h-5 w-5"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="h-4 w-4"
-                    >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h6" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 4.5a2.1 2.1 0 1 1 3 3L8 17l-4 1 1-4 9.5-9.5Z" />
-                    </svg>
-                    Foto de perfil
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActive("configuracion");
-                      setUserMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 17H9a4 4 0 0 1-4-4v-3a7 7 0 1 1 14 0v3a4 4 0 0 1-4 4Z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 20a2 2 0 0 0 4 0" />
+                  </svg>
+                  {unreadNotificationsCount > 0 ? (
+                    <span className="absolute -right-1 -top-1 inline-flex min-w-[20px] items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                      {unreadNotificationsBadgeLabel}
+                    </span>
+                  ) : null}
+                </button>
+
+                {notificationPanelOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-40 w-[min(95vw,420px)] rounded-xl border border-slate-200 bg-white p-3 text-slate-800 shadow-2xl">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-slate-900">
+                        Notificaciones{unreadNotificationsCount > 0 ? ` (${unreadNotificationsBadgeLabel})` : ""}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void onMarkAllNotificationsAsRead()}
+                        disabled={markingAllNotifications || unreadNotificationsCount === 0}
+                        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        {markingAllNotifications ? "Marcando..." : "Marcar todas"}
+                      </button>
+                    </div>
+
+                    <div className="mt-3 max-h-[360px] space-y-2 overflow-y-auto pr-1">
+                      {homeShareNotificationsLoading ? (
+                        <article className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                          Cargando...
+                        </article>
+                      ) : quickHeaderNotifications.length === 0 ? (
+                        <article className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                          No tienes notificaciones.
+                        </article>
+                      ) : (
+                        quickHeaderNotifications.map((notification) => {
+                          const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
+                          const resourceTypeText =
+                            notification.resourceType === "exam"
+                              ? "Examen"
+                              : notification.resourceType === "course"
+                                ? "Curso"
+                                : notification.resourceType === "schedule"
+                                  ? "Horario"
+                                : notification.resourceType === "sala"
+                                  ? "Sala"
+                                  : "Recurso";
+                          const isPendingExamInvite =
+                            notification.resourceType === "exam" && invitationStatus === "pending";
+                          const isRead = !!notification.readAt;
+                          const canOpenResource =
+                            notification.resourceType === "exam"
+                              ? invitationStatus === "accepted"
+                              : Boolean(notification.token && notification.token.trim());
+
+                          return (
+                            <article
+                              key={`header-notification-${notification.id}`}
+                              className={`rounded-lg border px-3 py-2 ${
+                                isRead ? "border-slate-200 bg-white" : "border-blue-200 bg-blue-50"
+                              }`}
+                            >
+                              <p className="text-sm font-semibold text-slate-800">
+                                {resourceTypeText}: {notification.resourceName?.trim() || "Sin nombre"}
+                              </p>
+                              <p className="mt-0.5 line-clamp-2 text-xs text-slate-600">
+                                {notification.message?.trim() || "Recibiste una invitacion compartida."}
+                              </p>
+                              <p className="mt-1 text-[11px] text-slate-500">
+                                {formatExamCreatedAt(notification.createdAt, undefined)}
+                              </p>
+                              <div className="mt-2 flex flex-wrap justify-end gap-1.5">
+                                {isPendingExamInvite ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        notificationActionLoadingId === notification.id || markingAllNotifications
+                                      }
+                                      onClick={() => void onRejectNotificationInvitation(notification)}
+                                      className="rounded-md border border-rose-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Rechazar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        notificationActionLoadingId === notification.id || markingAllNotifications
+                                      }
+                                      onClick={() => void onAcceptNotificationInvitation(notification)}
+                                      className="rounded-md bg-[#004aad] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#003b88] disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      Aceptar
+                                    </button>
+                                  </>
+                                ) : canOpenResource ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => void onOpenNotificationResource(notification)}
+                                    className="rounded-md bg-[#004aad] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#003b88]"
+                                  >
+                                    {notification.resourceType === "exam" ? "Ver examen" : "Abrir"}
+                                  </button>
+                                ) : null}
+                                {!isRead ? (
+                                  <button
+                                    type="button"
+                                    disabled={
+                                      notificationActionLoadingId === notification.id || markingAllNotifications
+                                    }
+                                    onClick={() => void onMarkNotificationAsRead(notification)}
+                                    className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                                  >
+                                    Leida
+                                  </button>
+                                ) : null}
+                              </div>
+                            </article>
+                          );
+                        })
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setActive("notificaciones");
+                          setNotificationPanelOpen(false);
+                        }}
+                        className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        Ver todas
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUserMenuOpen((value) => !value);
+                    setNotificationPanelOpen(false);
+                  }}
+                  className="inline-flex h-10 min-w-0 max-w-[11.5rem] items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-2.5 text-xs font-semibold uppercase tracking-wide leading-none text-white transition-colors hover:bg-white/20 sm:h-11 sm:max-w-[16rem] sm:px-3.5 sm:text-sm"
+                >
+                  <span className="relative h-8 w-8 overflow-hidden rounded-full border border-white/25 bg-white/20 text-xs font-bold text-white">
+                    {profileImageData ? (
+                      <img
+                        src={profileImageData}
+                        alt="Mi foto"
+                        className="absolute inset-0 h-full w-full object-cover"
+                        style={profileImagePreviewStyle}
+                      />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center">
+                        {user.name.slice(0, 1).toUpperCase()}
+                      </span>
+                    )}
+                  </span>
+                  <span className="max-w-[7.5rem] truncate sm:max-w-[11rem]">{user.username}</span>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="h-4 w-4"
                   >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="h-4 w-4"
+                    <path strokeLinecap="round" strokeLinejoin="round" d="m6 9 6 6 6-6" />
+                  </svg>
+                </button>
+
+                {userMenuOpen ? (
+                  <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-48 rounded-lg border border-slate-200 bg-white p-1 shadow-xl">
+                    <button
+                      type="button"
+                      onClick={onOpenProfileImageEditorFromSidebar}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h7" />
-                      <circle cx="14" cy="6" r="2" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h3" />
-                      <circle cx="10" cy="12" r="2" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 18h11" />
-                      <circle cx="18" cy="18" r="2" />
-                    </svg>
-                    Configuracion
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setActive("perfil");
-                      setUserMenuOpen(false);
-                    }}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="h-4 w-4"
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="h-4 w-4"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 21h6" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M14.5 4.5a2.1 2.1 0 1 1 3 3L8 17l-4 1 1-4 9.5-9.5Z" />
+                      </svg>
+                      Foto de perfil
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActive("configuracion");
+                        setUserMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
-                      <circle cx="12" cy="8" r="4" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 20a7 7 0 0 1 14 0" />
-                    </svg>
-                    Perfil
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onLogout}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="h-4 w-4"
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="h-4 w-4"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h7" />
+                        <circle cx="14" cy="6" r="2" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 12h3" />
+                        <circle cx="10" cy="12" r="2" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 18h11" />
+                        <circle cx="18" cy="18" r="2" />
+                      </svg>
+                      Configuracion
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActive("perfil");
+                        setUserMenuOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-100"
                     >
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 17l5-5-5-5" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M20 12H9" />
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 19H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6" />
-                    </svg>
-                    Cerrar sesion
-                  </button>
-                </div>
-              ) : null}
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="h-4 w-4"
+                      >
+                        <circle cx="12" cy="8" r="4" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 20a7 7 0 0 1 14 0" />
+                      </svg>
+                      Perfil
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onLogout}
+                      className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="h-4 w-4"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15 17l5-5-5-5" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M20 12H9" />
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 19H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6" />
+                      </svg>
+                      Cerrar sesion
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </header>
 
@@ -15728,6 +16753,68 @@ export default function DashboardPage() {
             </div>
           </main>
 
+          {showTutorialModal ? (
+            <ModalShell
+              title={`Tutorial: ${activeTutorialGuide.sectionTitle}`}
+              onClose={() => setShowTutorialModal(false)}
+            >
+              <div className="space-y-4">
+                <p className="text-sm text-slate-700">{activeTutorialGuide.description}</p>
+
+                {activeTutorialEmbedUrl ? (
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                    <div className="relative w-full" style={{ paddingTop: "56.25%" }}>
+                      <iframe
+                        src={activeTutorialEmbedUrl}
+                        title={`Tutorial de ${activeTutorialGuide.sectionTitle}`}
+                        className="absolute inset-0 h-full w-full"
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    Tutorial en video no configurado para este modulo. Agrega el enlace de YouTube en
+                    <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">
+                      tutorialGuideBySection
+                    </code>
+                    dentro de <code className="mx-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900">dashboard/page.tsx</code>.
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-slate-800">Pasos rapidos</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-slate-700">
+                    {activeTutorialGuide.quickSteps.map((step, index) => (
+                      <li key={`tutorial-step-${index}`}>{step}</li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowTutorialModal(false)}
+                    className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Cerrar
+                  </button>
+                  {activeTutorialGuide.youtubeUrl ? (
+                    <a
+                      href={activeTutorialGuide.youtubeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                    >
+                      Abrir en YouTube
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+            </ModalShell>
+          ) : null}
+
           {shareTarget ? (
             <ModalShell
               title={`Compartir ${
@@ -15735,7 +16822,9 @@ export default function DashboardPage() {
                   ? "examen"
                   : shareTarget.resourceType === "course"
                     ? "curso"
-                    : "sala"
+                    : shareTarget.resourceType === "schedule"
+                      ? "horario"
+                      : "sala"
               }`}
               onClose={closeShareModal}
             >
@@ -15744,7 +16833,7 @@ export default function DashboardPage() {
                   Recurso: <span className="font-semibold">{shareTarget.resourceName}</span>
                 </p>
 
-                {/* --- 1. ENLACE PÃšBLICO --- */}
+                {/* --- 1. ENLACE PÚBLICO --- */}
                 <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
                   <h3 className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-slate-700">
                     <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -16546,4 +17635,11 @@ function ModalShell({
     </div>
   );
 }
+
+
+
+
+
+
+
 
