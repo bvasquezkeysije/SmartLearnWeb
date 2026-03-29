@@ -1935,6 +1935,7 @@ export default function DashboardPage() {
   const [showGroupRoomClosedModal, setShowGroupRoomClosedModal] = useState(false);
   const [groupRoomClosedMessage, setGroupRoomClosedMessage] = useState("La sala grupal fue cerrada por el anfitrion.");
   const [groupRoomClosedKeepViewing, setGroupRoomClosedKeepViewing] = useState(false);
+  const [groupRoomClosedAllowKeepViewing, setGroupRoomClosedAllowKeepViewing] = useState(true);
   const [submittingGroupAnswer, setSubmittingGroupAnswer] = useState(false);
   const [advancingGroupQuestion, setAdvancingGroupQuestion] = useState(false);
   const [closingAndRestartingGroupPractice, setClosingAndRestartingGroupPractice] = useState(false);
@@ -7532,6 +7533,7 @@ export default function DashboardPage() {
     }
     setShowGroupRoomClosedModal(false);
     setGroupRoomClosedKeepViewing(false);
+    setGroupRoomClosedAllowKeepViewing(true);
     setShowGroupPracticeRunnerModal(false);
     setGroupPracticeState(null);
     setGroupAnswersByQuestionKey({});
@@ -7547,6 +7549,10 @@ export default function DashboardPage() {
   };
 
   const onKeepViewingClosedGroupRoomResult = () => {
+    if (!groupRoomClosedAllowKeepViewing) {
+      onGoToExamsAfterGroupRoomClosed();
+      return;
+    }
     setShowGroupRoomClosedModal(false);
     setGroupRoomClosedKeepViewing(true);
     setExamFeedback("La sala fue cerrada por el anfitrion. Puedes seguir viendo el resultado final.", "info");
@@ -7555,6 +7561,7 @@ export default function DashboardPage() {
   const onGoToExamsAfterGroupRoomClosed = () => {
     setShowGroupRoomClosedModal(false);
     setGroupRoomClosedKeepViewing(false);
+    setGroupRoomClosedAllowKeepViewing(true);
     onCloseGroupPracticeRunner();
     setActive("examenes");
   };
@@ -7640,6 +7647,19 @@ export default function DashboardPage() {
             user.token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, state));
+
+          const normalizedStatus = (state.status ?? "").toLowerCase();
+          const waitingRoomClosedByHost = normalizedStatus === "finished" && Number(state.totalQuestions ?? 0) <= 0;
+          if (waitingRoomClosedByHost) {
+            setGroupRoomClosedMessage("La sala de espera fue cerrada por el anfitrion. Debes volver al modulo de examenes.");
+            setGroupRoomClosedAllowKeepViewing(false);
+            setShowGroupRoomClosedModal(true);
+            setGroupRoomClosedKeepViewing(false);
+            if (user) {
+              window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
+            }
+            return;
+          }
         } catch (pollError) {
           if (!shouldAttemptSessionRecovery(pollError)) {
             return;
@@ -7659,6 +7679,7 @@ export default function DashboardPage() {
             setGroupRoomClosedMessage(
               "La sala de espera fue cerrada por el anfitrion. Deseas quedarte viendo el resultado final o volver al modulo de examenes?",
             );
+            setGroupRoomClosedAllowKeepViewing(true);
             setShowGroupRoomClosedModal(true);
             setGroupRoomClosedKeepViewing(false);
             if (user) {
@@ -11550,7 +11571,7 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  {canStartGroup ? (
+                  {canStartGroup && groupPracticeState.status === "active" ? (
                     <button
                       type="button"
                       onClick={() => void onCloseAndRestartGroupPractice()}
@@ -17365,18 +17386,20 @@ export default function DashboardPage() {
           {showGroupRoomClosedModal ? (
             <ModalShell
               title="Sala cerrada"
-              onClose={onKeepViewingClosedGroupRoomResult}
+              onClose={groupRoomClosedAllowKeepViewing ? onKeepViewingClosedGroupRoomResult : onGoToExamsAfterGroupRoomClosed}
             >
               <div className="space-y-3">
                 <p className="text-sm text-slate-700">{groupRoomClosedMessage}</p>
                 <div className="flex flex-wrap justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={onKeepViewingClosedGroupRoomResult}
-                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    Seguir viendo resultado final
-                  </button>
+                  {groupRoomClosedAllowKeepViewing ? (
+                    <button
+                      type="button"
+                      onClick={onKeepViewingClosedGroupRoomResult}
+                      className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      Seguir viendo resultado final
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={onGoToExamsAfterGroupRoomClosed}
