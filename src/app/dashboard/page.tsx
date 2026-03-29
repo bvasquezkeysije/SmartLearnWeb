@@ -153,6 +153,10 @@ type ExamGroupState = {
   currentAnswers?: ExamGroupCurrentAnswer[];
   participants: ExamGroupParticipantState[];
   finalRanking?: ExamGroupRankingEntry[];
+  firstResponderName?: string | null;
+  firstAnswerElapsedSeconds?: number | null;
+  questionStartedAt?: string | null;
+  questionStartedAtEpochMs?: number | null;
   startedAt?: unknown;
   finishedAt?: unknown;
 };
@@ -1939,19 +1943,15 @@ export default function DashboardPage() {
   const [groupAutoSubmitKey, setGroupAutoSubmitKey] = useState<string | null>(null);
   const [groupTimerExpired, setGroupTimerExpired] = useState(false);
   const [groupTimerExpiredQuestionKey, setGroupTimerExpiredQuestionKey] = useState<string | null>(null);
-  const [groupQuestionLocalStartMs, setGroupQuestionLocalStartMs] = useState<number | null>(null);
   const groupQuestionRuntimeKeyRef = useRef<string | null>(null);
   const groupReviewQuestionKeyRef = useRef<string | null>(null);
   const groupReviewStartedAtMsRef = useRef<number | null>(null);
   const groupInputQuestionKeyRef = useRef<string | null>(null);
   const [groupAnswersByQuestionKey, setGroupAnswersByQuestionKey] = useState<Record<string, ExamGroupCurrentAnswer[]>>({});
-  const groupQuestionStartedAt =
-    (groupPracticeState as (ExamGroupState & { questionStartedAt?: string | null }) | null)?.questionStartedAt ?? null;
-  const groupFirstResponderName =
-    (groupPracticeState as (ExamGroupState & { firstResponderName?: string | null }) | null)?.firstResponderName ?? null;
-  const groupFirstAnswerElapsedSeconds =
-    (groupPracticeState as (ExamGroupState & { firstAnswerElapsedSeconds?: number | null }) | null)
-      ?.firstAnswerElapsedSeconds ?? null;
+  const groupQuestionStartedAt = groupPracticeState?.questionStartedAt ?? null;
+  const groupQuestionStartedAtEpochMs = groupPracticeState?.questionStartedAtEpochMs ?? null;
+  const groupFirstResponderName = groupPracticeState?.firstResponderName ?? null;
+  const groupFirstAnswerElapsedSeconds = groupPracticeState?.firstAnswerElapsedSeconds ?? null;
   const groupCanStartGroup = Boolean(groupPracticeState?.canStartGroup);
   const [groupAutoAdvanceSecondsLeft, setGroupAutoAdvanceSecondsLeft] = useState<number | null>(null);
   const [groupSubmittedQuestionKey, setGroupSubmittedQuestionKey] = useState<string | null>(null);
@@ -7174,7 +7174,6 @@ export default function DashboardPage() {
       setGroupQuestionRemainingSeconds(null);
       setGroupAutoSubmitKey(null);
       setGroupTimerExpired(false);
-      setGroupQuestionLocalStartMs(null);
       groupQuestionRuntimeKeyRef.current = null;
       setGroupAnswersByQuestionKey({});
       setPracticeFeedbackStatus(null);
@@ -7535,7 +7534,6 @@ export default function DashboardPage() {
     setGroupQuestionRemainingSeconds(null);
     setGroupAutoSubmitKey(null);
     setGroupTimerExpired(false);
-    setGroupQuestionLocalStartMs(null);
     groupQuestionRuntimeKeyRef.current = null;
     resetPracticeInputState();
     setActive(practiceOriginSection === "ia" ? "ia" : practiceOriginSection === "cursos" ? "cursos" : "examenes");
@@ -7695,20 +7693,16 @@ export default function DashboardPage() {
     if (!showGroupPracticeRunnerModal || !groupPracticeState || groupPracticeState.status !== "active" || !groupPracticeState.currentQuestion) {
       setGroupQuestionElapsedSeconds(0);
       setGroupQuestionRemainingSeconds(null);
-      setGroupQuestionLocalStartMs(null);
       groupQuestionRuntimeKeyRef.current = null;
       return;
     }
 
     const questionRuntimeKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`;
     const timerLimit = Math.max(0, groupPracticeState.currentQuestion.temporizadorSegundos ?? 0);
-
-    let startedAtMs = groupQuestionLocalStartMs;
-    if (groupQuestionRuntimeKeyRef.current !== questionRuntimeKey || startedAtMs == null) {
-      const now = Date.now();
+    const parsedStartedAt = toMillisOrZero(groupQuestionStartedAtEpochMs ?? groupQuestionStartedAt);
+    const startedAtMs = parsedStartedAt > 0 ? parsedStartedAt : Date.now();
+    if (groupQuestionRuntimeKeyRef.current !== questionRuntimeKey) {
       groupQuestionRuntimeKeyRef.current = questionRuntimeKey;
-      startedAtMs = now;
-      setGroupQuestionLocalStartMs(now);
       setGroupTimerExpired(false);
       setGroupTimerExpiredQuestionKey(null);
       setGroupAutoSubmitKey(null);
@@ -7718,7 +7712,7 @@ export default function DashboardPage() {
     }
 
     const tick = () => {
-      const elapsed = Math.max(0, Math.floor((Date.now() - (startedAtMs ?? Date.now())) / 1000));
+      const elapsed = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
       setGroupQuestionElapsedSeconds(elapsed);
       if (timerLimit > 0) {
         setGroupQuestionRemainingSeconds(Math.max(0, timerLimit - elapsed));
@@ -7737,7 +7731,8 @@ export default function DashboardPage() {
     groupPracticeState?.currentQuestionIndex,
     groupPracticeState?.currentQuestion?.id,
     groupPracticeState?.currentQuestion?.temporizadorSegundos,
-    groupQuestionLocalStartMs,
+    groupQuestionStartedAt,
+    groupQuestionStartedAtEpochMs,
   ]);
 
   useEffect(() => {
@@ -7842,27 +7837,7 @@ export default function DashboardPage() {
       groupPracticeState && groupPracticeState.currentQuestion
         ? `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`
         : null;
-    const currentQuestionType = (groupPracticeState?.currentQuestion?.questionType ?? "").toLowerCase();
-    const connectedParticipants = (groupPracticeState?.participants ?? []).filter((participant) => Boolean(participant.connected));
-    const sessionParticipants = (groupPracticeState?.participants ?? []).filter((participant) => participant.userId != null);
-    const answeredByUserKey = new Set(
-      (groupPracticeState?.currentAnswers ?? [])
-        .filter((answer) => (answer.selectedAnswer ?? "").trim() !== "")
-        .map((answer) => normalizeGroupUserKey(answer.userId)),
-    );
-    const allSessionParticipantsAnsweredByCurrentAnswers =
-      sessionParticipants.length > 0 &&
-      sessionParticipants.every((participant) => answeredByUserKey.has(normalizeGroupUserKey(participant.userId)));
-    const allConnectedAnsweredByCurrentAnswers =
-      connectedParticipants.length > 0 &&
-      connectedParticipants.every((participant) => answeredByUserKey.has(normalizeGroupUserKey(participant.userId)));
-    const allConnectedAnsweredByParticipants =
-      connectedParticipants.length > 0 &&
-      connectedParticipants.every((participant) => Boolean(participant.answeredCurrent));
-    const allAnswered =
-      currentQuestionType === "multiple_choice"
-        ? allSessionParticipantsAnsweredByCurrentAnswers || allConnectedAnsweredByCurrentAnswers
-        : Boolean(groupPracticeState?.allAnsweredCurrent) || allConnectedAnsweredByParticipants;
+    const allAnswered = Boolean(groupPracticeState?.allAnsweredCurrent);
     const expiredForCurrent =
       Boolean(groupTimerExpired) &&
       currentQuestionKey != null &&
@@ -7951,10 +7926,6 @@ export default function DashboardPage() {
     groupPracticeState?.currentQuestionIndex,
     groupPracticeState?.currentQuestion?.id,
     groupPracticeState?.allAnsweredCurrent,
-    (groupPracticeState?.participants ?? [])
-      .filter((participant) => Boolean(participant.connected))
-      .map((participant) => `${participant.userId}:${participant.answeredCurrent ? 1 : 0}`)
-      .join("|"),
     user,
     selectedExam,
     groupTimerExpired,
@@ -11439,7 +11410,10 @@ export default function DashboardPage() {
 
             return toNumericScore(a.rank) - toNumericScore(b.rank);
           });
-        const isReviewWindow = groupAutoAdvanceSecondsLeft != null;
+        const isReviewWindow =
+          groupAutoAdvanceSecondsLeft != null &&
+          currentGroupQuestionKey != null &&
+          groupReviewQuestionKeyRef.current === currentGroupQuestionKey;
         const normalizeReviewToken = (value: string | null | undefined): string =>
           (value ?? "")
             .normalize("NFD")
