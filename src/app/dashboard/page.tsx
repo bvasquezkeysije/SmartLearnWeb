@@ -8076,7 +8076,17 @@ export default function DashboardPage() {
       groupPracticeState && groupPracticeState.currentQuestion
         ? `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`
         : null;
-    const allAnswered = Boolean(groupPracticeState?.allAnsweredCurrent);
+    const connectedParticipants = (groupPracticeState?.participants ?? []).filter((participant) =>
+      Boolean(participant.connected),
+    );
+    const answeredUsers = new Set(
+      (groupPracticeState?.currentAnswers ?? [])
+        .filter((answer) => (answer.selectedAnswer ?? "").trim() !== "")
+        .map((answer) => normalizeGroupUserKey(answer.userId)),
+    );
+    const allAnswered =
+      connectedParticipants.length > 0 &&
+      connectedParticipants.every((participant) => answeredUsers.has(normalizeGroupUserKey(participant.userId)));
     const expiredForCurrent =
       Boolean(groupTimerExpired) &&
       currentQuestionKey != null &&
@@ -11658,8 +11668,22 @@ export default function DashboardPage() {
 
             return toNumericScore(a.rank) - toNumericScore(b.rank);
           });
+        const connectedParticipantCount = connectedWaitingParticipants.length;
+        const answeredConnectedCount = connectedWaitingParticipants.filter((participant) => {
+          const answer = currentQuestionAnswerByUserId.get(normalizeGroupUserKey(participant.userId));
+          return Boolean((answer?.selectedAnswer ?? "").trim());
+        }).length;
+        const allConnectedAnsweredCurrent =
+          connectedParticipantCount > 0 && answeredConnectedCount >= connectedParticipantCount;
+        const expiredForCurrentQuestion =
+          Boolean(groupTimerExpired) &&
+          currentGroupQuestionKey != null &&
+          groupTimerExpiredQuestionKey === currentGroupQuestionKey;
+        const shouldRevealCurrentQuestion = expiredForCurrentQuestion || allConnectedAnsweredCurrent;
         const isReviewWindow =
+          shouldRevealCurrentQuestion &&
           groupAutoAdvanceSecondsLeft != null &&
+          groupAutoAdvanceSecondsLeft > 0 &&
           currentGroupQuestionKey != null &&
           groupReviewQuestionKeyRef.current === currentGroupQuestionKey;
         const normalizeReviewToken = (value: string | null | undefined): string =>
@@ -11872,7 +11896,7 @@ export default function DashboardPage() {
                             Puntaje: {currentGroupQuestion.points ?? 1}
                           </span>
                           <span className="rounded-full bg-blue-700 px-3 py-1 text-sm font-bold text-white">
-                            Cronometro: {formatClock(groupAutoAdvanceSecondsLeft != null ? 0 : groupQuestionElapsedSeconds)}
+                            Cronometro: {formatClock(isReviewWindow ? 0 : groupQuestionElapsedSeconds)}
                           </span>
                           <span
                             className={`rounded-full px-3 py-1 text-sm font-bold ${
@@ -11882,13 +11906,13 @@ export default function DashboardPage() {
                             }`}
                           >
                             Temporizador:{" "}
-                            {groupAutoAdvanceSecondsLeft != null
+                            {isReviewWindow
                               ? formatClock(0)
                               : groupQuestionRemainingSeconds != null
                               ? formatClock(groupQuestionRemainingSeconds)
                               : formatClock(currentGroupQuestion.temporizadorSegundos ?? 0)}
                           </span>
-                          {groupAutoAdvanceSecondsLeft != null ? (
+                          {isReviewWindow ? (
                             <span className="rounded-full bg-indigo-600 px-3 py-1 text-sm font-bold text-white">
                               Tiempo de revision: {formatClock(groupAutoAdvanceSecondsLeft)}
                             </span>
@@ -12018,7 +12042,7 @@ export default function DashboardPage() {
                         </>
                       ) : (
                         <>
-                          {groupAutoAdvanceSecondsLeft == null ? (
+                          {!isReviewWindow ? (
                             <div className="space-y-2">
                               <textarea
                                 value={effectivePracticeWrittenAnswer}
