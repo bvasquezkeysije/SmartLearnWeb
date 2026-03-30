@@ -875,6 +875,86 @@ function timeToMinutes(value: string): number {
   return hours * 60 + minutes;
 }
 
+function normalizeScheduleTimeInput(value: string): string | null {
+  const normalized = value.trim().toUpperCase().replace(/\./g, "").replace(/\s+/g, " ");
+  const match = normalized.match(/^(\d{1,2})(?::(\d{1,2}))?\s*(AM|PM)?$/);
+  if (!match) {
+    return null;
+  }
+
+  let hours = Number(match[1]);
+  const minutes = Number(match[2] ?? "0");
+  const meridiem = match[3] ?? "";
+
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes < 0 || minutes > 59) {
+    return null;
+  }
+
+  if (meridiem) {
+    if (hours < 1 || hours > 12) {
+      return null;
+    }
+    if (meridiem === "AM") {
+      if (hours === 12) {
+        hours = 0;
+      }
+    } else if (hours !== 12) {
+      hours += 12;
+    }
+  } else if (hours < 0 || hours > 23) {
+    return null;
+  }
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function splitScheduleTimeForForm(value: string): { time: string; meridiem: "AM" | "PM" } | null {
+  const normalized = normalizeScheduleTimeInput(value);
+  if (!normalized) {
+    return null;
+  }
+  const [hoursRaw, minutesRaw] = normalized.split(":");
+  const hours = Number(hoursRaw);
+  if (!Number.isFinite(hours)) {
+    return null;
+  }
+  const period: "AM" | "PM" = hours >= 12 ? "PM" : "AM";
+  const hours12 = hours % 12 === 0 ? 12 : hours % 12;
+  return {
+    time: `${String(hours12).padStart(2, "0")}:${minutesRaw}`,
+    meridiem: period,
+  };
+}
+
+function normalizeScheduleTimeFromForm(value: string, meridiem: "AM" | "PM"): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const withMeridiem = normalizeScheduleTimeInput(`${trimmed} ${meridiem}`);
+  if (withMeridiem) {
+    return withMeridiem;
+  }
+  return normalizeScheduleTimeInput(trimmed);
+}
+
+function formatScheduleTimeForDisplay(value: string): string {
+  const split = splitScheduleTimeForForm(value);
+  if (!split) {
+    return value.trim();
+  }
+  const [hoursRaw, minutesRaw] = split.time.split(":");
+  const hours = Number(hoursRaw);
+  if (!Number.isFinite(hours)) {
+    return value.trim();
+  }
+  return `${hours}:${minutesRaw} ${split.meridiem}`;
+}
+
+function formatScheduleTimeRangeForDisplay(startValue: string, endValue: string): string {
+  return `${formatScheduleTimeForDisplay(startValue)} - ${formatScheduleTimeForDisplay(endValue)}`;
+}
+
 function buildScheduleSlots(startHour: number, totalSlots: number, slotMinutes: number) {
   return Array.from({ length: totalSlots }, (_, index) => {
     const start = startHour * 60 + index * slotMinutes;
@@ -884,7 +964,7 @@ function buildScheduleSlots(startHour: number, totalSlots: number, slotMinutes: 
     return {
       start,
       end,
-      label: `${startLabel} - ${endLabel}`,
+      label: formatScheduleTimeRangeForDisplay(startLabel, endLabel),
     };
   });
 }
@@ -1610,6 +1690,14 @@ function normalizeInvitationStatus(value: unknown): "pending" | "accepted" | "re
   return "accepted";
 }
 
+function notificationRequiresInvitationResponse(resourceType: unknown): boolean {
+  if (typeof resourceType !== "string") {
+    return false;
+  }
+  const normalized = resourceType.trim().toLowerCase();
+  return normalized === "exam" || normalized === "schedule";
+}
+
 function isSupportConversationPayload(value: unknown): value is SupportConversationItem {
   if (!value || typeof value !== "object") {
     return false;
@@ -1935,6 +2023,7 @@ export default function DashboardPage() {
   const [showGroupPracticeRunnerModal, setShowGroupPracticeRunnerModal] = useState(false);
   const [groupPracticeState, setGroupPracticeState] = useState<ExamGroupState | null>(null);
   const [groupPracticeLoading, setGroupPracticeLoading] = useState(false);
+  const [groupPracticeLoadingExamId, setGroupPracticeLoadingExamId] = useState<number | null>(null);
   const [closingGroupWaitingRoom, setClosingGroupWaitingRoom] = useState(false);
   const [showGroupRoomClosedModal, setShowGroupRoomClosedModal] = useState(false);
   const [groupRoomClosedMessage, setGroupRoomClosedMessage] = useState("La sala grupal fue cerrada por el anfitrion.");
@@ -2039,7 +2128,9 @@ export default function DashboardPage() {
   const [scheduleFormDescription, setScheduleFormDescription] = useState("");
   const [scheduleFormDay, setScheduleFormDay] = useState<ScheduleDayKey>("monday");
   const [scheduleFormStartTime, setScheduleFormStartTime] = useState("08:00");
+  const [scheduleFormStartMeridiem, setScheduleFormStartMeridiem] = useState<"AM" | "PM">("AM");
   const [scheduleFormEndTime, setScheduleFormEndTime] = useState("09:30");
+  const [scheduleFormEndMeridiem, setScheduleFormEndMeridiem] = useState<"AM" | "PM">("AM");
   const [scheduleFormLocation, setScheduleFormLocation] = useState("");
   const [scheduleFormColor, setScheduleFormColor] = useState<ScheduleColorKey>("blue");
   const [showCreateScheduleModal, setShowCreateScheduleModal] = useState(false);
@@ -3093,7 +3184,16 @@ export default function DashboardPage() {
     }
     inactivityIntervalRef.current = window.setInterval(checkInactivity, 5000);
 
-    const events: Array<keyof WindowEventMap> = ["mousemove", "mousedown", "keydown", "touchstart", "wheel"];
+    const events: Array<keyof WindowEventMap> = [
+      "mousemove",
+      "mousedown",
+      "pointerdown",
+      "keydown",
+      "touchstart",
+      "touchmove",
+      "wheel",
+      "scroll",
+    ];
     events.forEach((eventName) => {
       window.addEventListener(eventName, resetInactivityTimer);
     });
@@ -3351,8 +3451,15 @@ export default function DashboardPage() {
       return;
     }
 
-    const startMinutes = timeToMinutes(scheduleFormStartTime);
-    const endMinutes = timeToMinutes(scheduleFormEndTime);
+    const normalizedStartTime = normalizeScheduleTimeFromForm(scheduleFormStartTime, scheduleFormStartMeridiem);
+    const normalizedEndTime = normalizeScheduleTimeFromForm(scheduleFormEndTime, scheduleFormEndMeridiem);
+    if (!normalizedStartTime || !normalizedEndTime) {
+      setScheduleFeedback("Usa un formato de hora valido. Ejemplo: 08:30 AM o 14:30.", "error");
+      return;
+    }
+
+    const startMinutes = timeToMinutes(normalizedStartTime);
+    const endMinutes = timeToMinutes(normalizedEndTime);
     if (startMinutes >= endMinutes) {
       setScheduleFeedback("La hora final debe ser mayor que la hora inicial.", "error");
       return;
@@ -3365,8 +3472,8 @@ export default function DashboardPage() {
         title,
         description: description || null,
         day: scheduleFormDay,
-        startTime: scheduleFormStartTime,
-        endTime: scheduleFormEndTime,
+        startTime: normalizedStartTime,
+        endTime: normalizedEndTime,
         location: location || null,
         color: scheduleFormColor,
       };
@@ -3381,7 +3488,9 @@ export default function DashboardPage() {
       setScheduleFormDescription("");
       setScheduleFormDay("monday");
       setScheduleFormStartTime("08:00");
+      setScheduleFormStartMeridiem("AM");
       setScheduleFormEndTime("09:30");
+      setScheduleFormEndMeridiem("AM");
       setScheduleFormLocation("");
       setScheduleFormColor("blue");
       setEditingScheduleId(null);
@@ -3439,8 +3548,22 @@ export default function DashboardPage() {
     setScheduleFormTitle(activity.title);
     setScheduleFormDescription(activity.description);
     setScheduleFormDay(activity.day);
-    setScheduleFormStartTime(activity.startTime);
-    setScheduleFormEndTime(activity.endTime);
+    const startSplit = splitScheduleTimeForForm(activity.startTime);
+    if (startSplit) {
+      setScheduleFormStartTime(startSplit.time);
+      setScheduleFormStartMeridiem(startSplit.meridiem);
+    } else {
+      setScheduleFormStartTime("08:00");
+      setScheduleFormStartMeridiem("AM");
+    }
+    const endSplit = splitScheduleTimeForForm(activity.endTime);
+    if (endSplit) {
+      setScheduleFormEndTime(endSplit.time);
+      setScheduleFormEndMeridiem(endSplit.meridiem);
+    } else {
+      setScheduleFormEndTime("09:30");
+      setScheduleFormEndMeridiem("AM");
+    }
     setScheduleFormLocation(activity.location);
     setScheduleFormColor(activity.color);
     setScheduleActionMenuId(null);
@@ -5462,16 +5585,31 @@ export default function DashboardPage() {
         {},
       )) as ShareNotificationItem;
       syncUpdatedNotification(updated);
+      const resourceType = (updated.resourceType ?? notification.resourceType ?? "").trim().toLowerCase();
+      if (resourceType === "exam") {
+        const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+        const examName = updated.resourceName?.trim() || notification.resourceName?.trim() || "Examen";
+        setClaimedExamInvitePrompt({
+          examId: updated.resourceId ?? notification.resourceId,
+          examName,
+          message: `Invitacion aceptada. ${examName} ya esta disponible en tu lista de examenes.`,
+          cachedExams: exams,
+        });
+        setActive("inicio");
+        return;
+      }
 
-      const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
-      const examName = updated.resourceName?.trim() || notification.resourceName?.trim() || "Examen";
-      setClaimedExamInvitePrompt({
-        examId: updated.resourceId ?? notification.resourceId,
-        examName,
-        message: `Invitacion aceptada. ${examName} ya esta disponible en tu lista de examenes.`,
-        cachedExams: exams,
-      });
-      setActive("inicio");
+      if (resourceType === "schedule") {
+        const scheduleId = Number(updated.resourceId ?? notification.resourceId);
+        if (Number.isFinite(scheduleId) && scheduleId > 0) {
+          setSchedulePreferredProfileId(scheduleId);
+          const scheduleModule = await fetchJson(`/api/v1/schedules?userId=${user.id}&scheduleId=${scheduleId}`, user.token);
+          setPayload(scheduleModule);
+          setActive("horarios");
+          const scheduleName = updated.resourceName?.trim() || notification.resourceName?.trim() || "Horario";
+          setScheduleFeedback(`Invitacion aceptada. ${scheduleName} ya esta disponible en tu modulo de horarios.`, "success");
+        }
+      }
     } catch (acceptError) {
       if (acceptError instanceof Error) {
         setError(acceptError.message);
@@ -5514,16 +5652,21 @@ export default function DashboardPage() {
       return;
     }
     const resourceType = (notification.resourceType ?? "").trim().toLowerCase();
+    const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
+    if (notificationRequiresInvitationResponse(resourceType) && invitationStatus === "pending") {
+      setError(
+        resourceType === "exam"
+          ? "Primero acepta o rechaza la invitacion del examen."
+          : "Primero acepta o rechaza la invitacion del horario.",
+      );
+      return;
+    }
+    if (notificationRequiresInvitationResponse(resourceType) && invitationStatus === "rejected") {
+      setError("Esta invitacion fue rechazada.");
+      return;
+    }
+
     if (resourceType === "exam") {
-      const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
-      if (invitationStatus === "pending") {
-        setError("Primero acepta o rechaza la invitacion del examen.");
-        return;
-      }
-      if (invitationStatus === "rejected") {
-        setError("Esta invitacion fue rechazada.");
-        return;
-      }
       try {
         const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
         setPayload(exams);
@@ -6936,6 +7079,7 @@ export default function DashboardPage() {
     }
 
     setSelectedExam(exam);
+    setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
     try {
       const state = (await postJson(`/api/v1/ia/exams/${exam.id}/practice/group/join`, user.token, {
@@ -6980,6 +7124,7 @@ export default function DashboardPage() {
       }
     } finally {
       setGroupPracticeLoading(false);
+      setGroupPracticeLoadingExamId(null);
     }
   };
 
@@ -6990,6 +7135,7 @@ export default function DashboardPage() {
     }
 
     setSelectedExam(exam);
+    setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
     try {
       const state = (await postJson(`/api/v1/ia/exams/${exam.id}/practice/group/create`, user.token, {
@@ -7022,6 +7168,7 @@ export default function DashboardPage() {
       }
     } finally {
       setGroupPracticeLoading(false);
+      setGroupPracticeLoadingExamId(null);
     }
   };
 
@@ -9296,17 +9443,15 @@ export default function DashboardPage() {
                             ? "Sala"
                             : "Recurso";
                     const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
-                    const isPendingExamInvite =
-                      notification.resourceType === "exam" && invitationStatus === "pending";
-                    const isRejectedExamInvite =
-                      notification.resourceType === "exam" && invitationStatus === "rejected";
+                    const requiresInvitationResponse = notificationRequiresInvitationResponse(notification.resourceType);
+                    const isPendingInvite = requiresInvitationResponse && invitationStatus === "pending";
+                    const isRejectedInvite = requiresInvitationResponse && invitationStatus === "rejected";
                     const shareUrl =
                       notification.token && notification.token.trim()
                         ? buildShareAccessUrl(notification.token.trim())
                         : "";
                     const isRead = !!notification.readAt;
-                    const canOpenResource =
-                      notification.resourceType === "exam" ? invitationStatus === "accepted" : !!shareUrl;
+                    const canOpenResource = requiresInvitationResponse ? invitationStatus === "accepted" : !!shareUrl;
                     return (
                       <article
                         key={notification.id}
@@ -9320,13 +9465,13 @@ export default function DashboardPage() {
                         <p className="mt-1 text-xs text-slate-600">
                           {notification.message?.trim() || "Recibiste una invitacion compartida."}
                         </p>
-                        {isRejectedExamInvite ? (
+                        {isRejectedInvite ? (
                           <p className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-rose-600">
                             Invitacion rechazada
                           </p>
                         ) : null}
                         <div className="mt-2 flex flex-wrap justify-end gap-2">
-                          {isPendingExamInvite ? (
+                          {isPendingInvite ? (
                             <>
                               <button
                                 type="button"
@@ -9351,7 +9496,7 @@ export default function DashboardPage() {
                               onClick={() => void onOpenNotificationResource(notification)}
                               className="rounded-lg bg-[#004aad] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#003b88]"
                             >
-                              {notification.resourceType === "exam" ? "Ver examen" : "Abrir"}
+                              {notification.resourceType === "exam" ? "Ver examen" : notification.resourceType === "schedule" ? "Ver horario" : "Abrir"}
                             </button>
                           ) : null}
                           {!isRead ? (
@@ -12577,6 +12722,7 @@ export default function DashboardPage() {
                   const canJoinGroupPractice = hasOpenGroupSession;
                   const showGroupPracticeButton = canStartGroupPractice || canJoinGroupPractice;
                   const groupPracticeButtonLabel = canStartGroupPractice ? "Grupal" : "Unirse";
+                  const isGroupButtonLoading = groupPracticeLoading && groupPracticeLoadingExamId === item.id;
                   return (
                   <article key={item.id} className="rounded-lg border border-slate-300 bg-slate-50 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -12707,7 +12853,7 @@ export default function DashboardPage() {
                           disabled={groupPracticeLoading}
                           className="inline-flex items-center gap-2 rounded-lg bg-[#1E40AF] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1E3A8A] disabled:cursor-not-allowed disabled:opacity-60"
                         >
-                          {groupPracticeLoading ? (
+                          {isGroupButtonLoading ? (
                             "Entrando..."
                           ) : (
                             <>
@@ -15058,18 +15204,15 @@ export default function DashboardPage() {
                   const createdAtText = formatExamCreatedAt(notification.createdAt, undefined);
                   const isRead = !!notification.readAt;
                   const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
-                  const isPendingExamInvite =
-                    notification.resourceType === "exam" && invitationStatus === "pending";
-                  const isAcceptedExamInvite =
-                    notification.resourceType === "exam" && invitationStatus === "accepted";
-                  const isRejectedExamInvite =
-                    notification.resourceType === "exam" && invitationStatus === "rejected";
+                  const requiresInvitationResponse = notificationRequiresInvitationResponse(notification.resourceType);
+                  const isPendingInvite = requiresInvitationResponse && invitationStatus === "pending";
+                  const isAcceptedInvite = requiresInvitationResponse && invitationStatus === "accepted";
+                  const isRejectedInvite = requiresInvitationResponse && invitationStatus === "rejected";
                   const shareUrl =
                     notification.token && notification.token.trim()
                       ? buildShareAccessUrl(notification.token.trim())
                       : "";
-                  const canOpenResource =
-                    notification.resourceType === "exam" ? invitationStatus === "accepted" : !!shareUrl;
+                  const canOpenResource = requiresInvitationResponse ? invitationStatus === "accepted" : !!shareUrl;
                   const resourceTypeText =
                     notification.resourceType === "exam"
                       ? "Examen"
@@ -15099,17 +15242,17 @@ export default function DashboardPage() {
                           >
                             {isRead ? "Leida" : "Nueva"}
                           </span>
-                          {notification.resourceType === "exam" ? (
+                          {requiresInvitationResponse ? (
                             <span
                               className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                isPendingExamInvite
+                                isPendingInvite
                                   ? "bg-amber-100 text-amber-700"
-                                  : isRejectedExamInvite
+                                  : isRejectedInvite
                                     ? "bg-rose-100 text-rose-700"
                                     : "bg-emerald-100 text-emerald-700"
                               }`}
                             >
-                              {isPendingExamInvite ? "Pendiente" : isRejectedExamInvite ? "Rechazada" : "Aceptada"}
+                              {isPendingInvite ? "Pendiente" : isRejectedInvite ? "Rechazada" : "Aceptada"}
                             </span>
                           ) : null}
                           <span className="text-xs text-slate-500">{createdAtText}</span>
@@ -15125,7 +15268,7 @@ export default function DashboardPage() {
                       </p>
 
                       <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
-                        {isPendingExamInvite ? (
+                        {isPendingInvite ? (
                           <>
                             <button
                               type="button"
@@ -15150,10 +15293,14 @@ export default function DashboardPage() {
                             onClick={() => void onOpenNotificationResource(notification)}
                             className="rounded-lg bg-[#004aad] px-3 py-2 text-sm font-semibold text-white hover:bg-[#003b88]"
                           >
-                            {isAcceptedExamInvite ? "Ver examen" : "Abrir"}
+                            {isAcceptedInvite && notification.resourceType === "exam"
+                              ? "Ver examen"
+                              : isAcceptedInvite && notification.resourceType === "schedule"
+                                ? "Ver horario"
+                                : "Abrir"}
                           </button>
                         ) : null}
-                        {notification.resourceType !== "exam" && shareUrl ? (
+                        {shareUrl && (!requiresInvitationResponse || invitationStatus === "accepted") ? (
                           <button
                             type="button"
                             onClick={async () => {
@@ -15337,25 +15484,76 @@ export default function DashboardPage() {
           <div className="grid gap-3 md:grid-cols-2">
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Hora inicio</label>
-              <input
-                type="time"
-                value={scheduleFormStartTime}
-                onChange={(event) => setScheduleFormStartTime(event.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
-                required
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={scheduleFormStartTime}
+                  onChange={(event) => setScheduleFormStartTime(event.target.value)}
+                  onBlur={(event) => {
+                    const normalized = normalizeScheduleTimeFromForm(event.target.value, scheduleFormStartMeridiem);
+                    if (!normalized) {
+                      return;
+                    }
+                    const split = splitScheduleTimeForForm(normalized);
+                    if (!split) {
+                      return;
+                    }
+                    setScheduleFormStartTime(split.time);
+                    setScheduleFormStartMeridiem(split.meridiem);
+                  }}
+                  placeholder="Ejemplo: 08:30"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                  required
+                />
+                <select
+                  value={scheduleFormStartMeridiem}
+                  onChange={(event) => setScheduleFormStartMeridiem(event.target.value as "AM" | "PM")}
+                  className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400"
+                >
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
             </div>
             <div>
               <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Hora fin</label>
-              <input
-                type="time"
-                value={scheduleFormEndTime}
-                onChange={(event) => setScheduleFormEndTime(event.target.value)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
-                required
-              />
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={scheduleFormEndTime}
+                  onChange={(event) => setScheduleFormEndTime(event.target.value)}
+                  onBlur={(event) => {
+                    const normalized = normalizeScheduleTimeFromForm(event.target.value, scheduleFormEndMeridiem);
+                    if (!normalized) {
+                      return;
+                    }
+                    const split = splitScheduleTimeForForm(normalized);
+                    if (!split) {
+                      return;
+                    }
+                    setScheduleFormEndTime(split.time);
+                    setScheduleFormEndMeridiem(split.meridiem);
+                  }}
+                  placeholder="Ejemplo: 09:45"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                  required
+                />
+                <select
+                  value={scheduleFormEndMeridiem}
+                  onChange={(event) => setScheduleFormEndMeridiem(event.target.value as "AM" | "PM")}
+                  className="w-24 rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-blue-400"
+                >
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
             </div>
           </div>
+          <p className="text-xs text-slate-500">Formato sugerido: HH:mm y selecciona AM/PM al costado.</p>
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Ubicacion</label>
             <input
@@ -15405,7 +15603,9 @@ export default function DashboardPage() {
                       setScheduleFormDescription("");
                       setScheduleFormDay("monday");
                       setScheduleFormStartTime("08:00");
+                      setScheduleFormStartMeridiem("AM");
                       setScheduleFormEndTime("09:30");
+                      setScheduleFormEndMeridiem("AM");
                       setScheduleFormLocation("");
                       setScheduleFormColor("blue");
                       setScheduleActionMenuId(null);
@@ -15549,7 +15749,7 @@ export default function DashboardPage() {
                                         scheduleColorClasses(singleActivity.color).bg
                                       } ${scheduleColorClasses(singleActivity.color).border} ${scheduleColorClasses(singleActivity.color).text}`}
                                       style={{ height: `${minHeight}px` }}
-                                      title={`${singleActivity.title} (${singleActivity.startTime} - ${singleActivity.endTime})`}
+                                      title={`${singleActivity.title} (${formatScheduleTimeRangeForDisplay(singleActivity.startTime, singleActivity.endTime)})`}
                                     >
                                       <div className="relative">
                                         <div className="flex items-start justify-between gap-1">
@@ -15604,7 +15804,7 @@ export default function DashboardPage() {
                                         ) : null}
                                       </div>
                                       <p className="truncate text-[9px] opacity-80">
-                                        {singleActivity.startTime} - {singleActivity.endTime}
+                                        {formatScheduleTimeRangeForDisplay(singleActivity.startTime, singleActivity.endTime)}
                                       </p>
                                     </div>
                                   ) : (
@@ -15622,7 +15822,7 @@ export default function DashboardPage() {
                                             <div
                                               key={`${activity.id}-${slot.label}-${day.key}`}
                                               className={`relative rounded-md border px-1.5 pt-1.5 pb-1.5 text-[11px] font-semibold ${colorStyle.bg} ${colorStyle.border} ${colorStyle.text}`}
-                                              title={`${activity.title} (${activity.startTime} - ${activity.endTime})`}
+                                              title={`${activity.title} (${formatScheduleTimeRangeForDisplay(activity.startTime, activity.endTime)})`}
                                             >
                                               <div className="relative">
                                                 <div className="flex items-start justify-between gap-1">
@@ -15677,7 +15877,7 @@ export default function DashboardPage() {
                                                 ) : null}
                                               </div>
                                               <p className="truncate text-[9px] opacity-80">
-                                                {activity.startTime} - {activity.endTime}
+                                                {formatScheduleTimeRangeForDisplay(activity.startTime, activity.endTime)}
                                               </p>
                                             </div>
                                           );
@@ -16588,6 +16788,7 @@ export default function DashboardPage() {
                       ) : (
                         quickHeaderNotifications.map((notification) => {
                           const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
+                          const requiresInvitationResponse = notificationRequiresInvitationResponse(notification.resourceType);
                           const resourceTypeText =
                             notification.resourceType === "exam"
                               ? "Examen"
@@ -16598,13 +16799,11 @@ export default function DashboardPage() {
                                 : notification.resourceType === "sala"
                                   ? "Sala"
                                   : "Recurso";
-                          const isPendingExamInvite =
-                            notification.resourceType === "exam" && invitationStatus === "pending";
+                          const isPendingInvite = requiresInvitationResponse && invitationStatus === "pending";
                           const isRead = !!notification.readAt;
-                          const canOpenResource =
-                            notification.resourceType === "exam"
-                              ? invitationStatus === "accepted"
-                              : Boolean(notification.token && notification.token.trim());
+                          const canOpenResource = requiresInvitationResponse
+                            ? invitationStatus === "accepted"
+                            : Boolean(notification.token && notification.token.trim());
 
                           return (
                             <article
@@ -16623,7 +16822,7 @@ export default function DashboardPage() {
                                 {formatExamCreatedAt(notification.createdAt, undefined)}
                               </p>
                               <div className="mt-2 flex flex-wrap justify-end gap-1.5">
-                                {isPendingExamInvite ? (
+                                {isPendingInvite ? (
                                   <>
                                     <button
                                       type="button"
@@ -16652,7 +16851,11 @@ export default function DashboardPage() {
                                     onClick={() => void onOpenNotificationResource(notification)}
                                     className="rounded-md bg-[#004aad] px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-[#003b88]"
                                   >
-                                    {notification.resourceType === "exam" ? "Ver examen" : "Abrir"}
+                                    {notification.resourceType === "exam"
+                                      ? "Ver examen"
+                                      : notification.resourceType === "schedule"
+                                        ? "Ver horario"
+                                        : "Abrir"}
                                   </button>
                                 ) : null}
                                 {!isRead ? (
