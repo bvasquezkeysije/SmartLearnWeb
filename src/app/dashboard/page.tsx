@@ -2190,6 +2190,7 @@ export default function DashboardPage() {
   const [supportCallNumber, setSupportCallNumber] = useState("");
   const [supportDraftMessage, setSupportDraftMessage] = useState("");
   const [supportConversationFilter, setSupportConversationFilter] = useState<"all" | "bug" | "support">("all");
+  const [showSupportDirectModal, setShowSupportDirectModal] = useState(false);
   const [showSupportBugModal, setShowSupportBugModal] = useState(false);
   const [supportBugTitle, setSupportBugTitle] = useState("");
   const [supportBugModule, setSupportBugModule] = useState("examenes");
@@ -5780,6 +5781,7 @@ export default function DashboardPage() {
       setSupportCallNumber("");
       setSupportFeedback("Caso de soporte creado.", "success");
       setSupportSelectedConversationId(created.id);
+      setShowSupportDirectModal(false);
       await reloadSupportModule();
     } catch (supportError) {
       if (supportError instanceof Error) {
@@ -9799,7 +9801,7 @@ export default function DashboardPage() {
       });
       const nextOpenedSessionOrder = getNextSessionOrder(openedCourseSessions);
       return (
-        <div className="w-full space-y-4">
+        <div className="flex w-full flex-col gap-4">
           <DataCard title="Cursos">
             {!openedCourse ? (
             <div className="space-y-2">
@@ -16083,9 +16085,9 @@ export default function DashboardPage() {
             </article>
           ) : null}
 
-          <div className="grid h-full min-h-0 w-full gap-4 lg:grid-cols-[320px_1fr] lg:grid-rows-[minmax(0,1fr)]">
+          <div className="order-2 grid h-full min-h-0 w-full gap-4 lg:grid-cols-[320px_1fr] lg:grid-rows-[minmax(0,1fr)]">
             <section className="flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="text-lg font-semibold text-slate-900">Chats soporte</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Tickets soporte</h2>
               <p className="mt-1 text-xs text-slate-600">Selecciona un ticket para ver su detalle.</p>
 
               <div className="mt-3 flex flex-wrap gap-2">
@@ -16169,7 +16171,7 @@ export default function DashboardPage() {
             </section>
 
             <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="text-lg font-semibold text-slate-900">Panel soporte</h2>
+              <h2 className="text-lg font-semibold text-slate-900">Detalles del ticket de soporte</h2>
               {selectedConversation == null ? (
                 <article className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                   Selecciona una conversacion para ver y enviar mensajes.
@@ -16259,8 +16261,56 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[1.3fr_1.7fr]">
-            <DataCard title="Soporte directo">
+          <div className="order-1">
+            <DataCard title="Canales de ayuda">
+              <p className="text-sm text-slate-600">
+                Usa los canales rapidos para contactar soporte y crea tickets para mantener historial y seguimiento.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onOpenSupportWhatsApp}
+                  className="rounded-lg border border-[#004aad] bg-white px-3 py-2 text-sm font-semibold text-[#004aad] hover:bg-blue-50"
+                >
+                  Abrir WhatsApp
+                </button>
+                <a
+                  href="tel:+51999999999"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Llamar soporte
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setShowSupportDirectModal(true)}
+                  className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+                >
+                  Soporte directo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowSupportBugModal(true)}
+                  className="rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
+                >
+                  Reportar bug
+                </button>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">Numero de soporte: +51 999 999 999</p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <article className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Bugs reportados</p>
+                  <p className="mt-1 text-xl font-bold text-rose-800">{bugConversationsCount}</p>
+                </article>
+                <article className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Tickets soporte</p>
+                  <p className="mt-1 text-xl font-bold text-blue-800">{supportConversationsCount}</p>
+                </article>
+              </div>
+            </DataCard>
+          </div>
+
+          {showSupportDirectModal ? (
+            <ModalShell title="Soporte directo" onClose={() => setShowSupportDirectModal(false)}>
               <form onSubmit={onCreateSupportConversation} className="space-y-3">
                 <input
                   value={supportSubject}
@@ -16313,7 +16363,14 @@ export default function DashboardPage() {
                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad]"
                   />
                 </div>
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSupportDirectModal(false)}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Cancelar
+                  </button>
                   <button
                     type="submit"
                     disabled={supportCreatingConversation}
@@ -16323,47 +16380,8 @@ export default function DashboardPage() {
                   </button>
                 </div>
               </form>
-            </DataCard>
-
-            <DataCard title="Canales de ayuda">
-              <p className="text-sm text-slate-600">
-                Usa WhatsApp para urgencias y usa tickets para mantener historial y seguimiento.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={onOpenSupportWhatsApp}
-                  className="rounded-lg border border-[#004aad] bg-white px-3 py-2 text-sm font-semibold text-[#004aad] hover:bg-blue-50"
-                >
-                  Abrir WhatsApp
-                </button>
-                <a
-                  href="tel:+51999999999"
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Llamar soporte
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setShowSupportBugModal(true)}
-                  className="rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
-                >
-                  Reportar bug
-                </button>
-              </div>
-              <p className="mt-3 text-xs text-slate-500">Numero de soporte: +51 999 999 999</p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <article className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Bugs reportados</p>
-                  <p className="mt-1 text-xl font-bold text-rose-800">{bugConversationsCount}</p>
-                </article>
-                <article className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Casos de soporte</p>
-                  <p className="mt-1 text-xl font-bold text-blue-800">{supportConversationsCount}</p>
-                </article>
-              </div>
-            </DataCard>
-          </div>
+            </ModalShell>
+          ) : null}
 
           {showSupportBugModal ? (
             <ModalShell title="Reportar bug" onClose={() => setShowSupportBugModal(false)}>
