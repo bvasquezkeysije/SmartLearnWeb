@@ -7730,7 +7730,6 @@ export default function DashboardPage() {
   };
 
   const onCloseGroupPracticeRunner = () => {
-    suppressGroupRoomClosedModalRef.current = false;
     if (user) {
       window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
     }
@@ -11655,7 +11654,19 @@ export default function DashboardPage() {
         const liveCurrentAnswers = groupPracticeState.currentAnswers ?? [];
         const cachedCurrentAnswers =
           currentGroupQuestionKey == null ? [] : (groupAnswersByQuestionKey[currentGroupQuestionKey] ?? []);
-        const currentQuestionAnswers = mergeGroupAnswers(cachedCurrentAnswers, liveCurrentAnswers);
+        const mergedCurrentAnswers = mergeGroupAnswers(cachedCurrentAnswers, liveCurrentAnswers);
+        const currentQuestionStartedAtMs = Number(groupPracticeState.questionStartedAtEpochMs ?? 0);
+        const currentQuestionAnswers = mergedCurrentAnswers.filter((answer) => {
+          if (!currentQuestionStartedAtMs || currentQuestionStartedAtMs <= 0) {
+            return true;
+          }
+          const answeredAtMs = toMillisOrZero(answer.answeredAt);
+          if (!answeredAtMs || answeredAtMs <= 0) {
+            return true;
+          }
+          // Ignora snapshots tardios/obsoletos que pertenezcan a una ventana previa.
+          return answeredAtMs + 1500 >= currentQuestionStartedAtMs;
+        });
         const currentQuestionAnswerByUserId = new Map<string, ExamGroupCurrentAnswer>();
         for (const answer of currentQuestionAnswers) {
           const key = normalizeGroupUserKey(answer.userId);
