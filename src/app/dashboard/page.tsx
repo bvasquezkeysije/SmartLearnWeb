@@ -2041,6 +2041,7 @@ export default function DashboardPage() {
   const groupReviewQuestionKeyRef = useRef<string | null>(null);
   const groupReviewStartedAtMsRef = useRef<number | null>(null);
   const groupStatePollInFlightRef = useRef(false);
+  const suppressGroupRoomClosedModalRef = useRef(false);
   const groupReviewRefreshInFlightRef = useRef(false);
   const groupInputQuestionKeyRef = useRef<string | null>(null);
   const [groupAnswersByQuestionKey, setGroupAnswersByQuestionKey] = useState<Record<string, ExamGroupCurrentAnswer[]>>({});
@@ -7078,6 +7079,7 @@ export default function DashboardPage() {
       return;
     }
 
+    suppressGroupRoomClosedModalRef.current = false;
     setSelectedExam(exam);
     setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
@@ -7134,6 +7136,7 @@ export default function DashboardPage() {
       return;
     }
 
+    suppressGroupRoomClosedModalRef.current = false;
     setSelectedExam(exam);
     setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
@@ -7693,6 +7696,7 @@ export default function DashboardPage() {
   };
 
   const onCloseGroupPracticeRunner = () => {
+    suppressGroupRoomClosedModalRef.current = false;
     if (user) {
       window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
     }
@@ -7736,6 +7740,7 @@ export default function DashboardPage() {
       return;
     }
 
+    suppressGroupRoomClosedModalRef.current = true;
     setClosingGroupWaitingRoom(true);
     try {
       await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/close`, user.token, {
@@ -7747,6 +7752,7 @@ export default function DashboardPage() {
       setExamFeedback("Sala de espera cerrada. Regresaste al modulo de examenes.", "success");
       await refreshExams();
     } catch (closeError) {
+      suppressGroupRoomClosedModalRef.current = false;
       if (closeError instanceof Error) {
         setExamFeedback(closeError.message, "error");
       } else {
@@ -7816,6 +7822,9 @@ export default function DashboardPage() {
           const normalizedStatus = (state.status ?? "").toLowerCase();
           const waitingRoomClosedByHost = normalizedStatus === "finished" && Number(state.totalQuestions ?? 0) <= 0;
           if (waitingRoomClosedByHost) {
+            if (suppressGroupRoomClosedModalRef.current) {
+              return;
+            }
             setGroupRoomClosedMessage("La sala de espera fue cerrada por el anfitrion. Debes volver al modulo de examenes.");
             setGroupRoomClosedAllowKeepViewing(false);
             setShowGroupRoomClosedModal(true);
@@ -7841,6 +7850,9 @@ export default function DashboardPage() {
               setGroupPracticeState((previous) => mergeGroupState(previous, latestState));
             }
           } catch {
+            if (suppressGroupRoomClosedModalRef.current) {
+              return;
+            }
             setGroupRoomClosedMessage(
               "La sala de espera fue cerrada por el anfitrion. Deseas quedarte viendo el resultado final o volver al modulo de examenes?",
             );
