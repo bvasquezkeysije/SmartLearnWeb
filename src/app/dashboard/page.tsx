@@ -2182,7 +2182,6 @@ export default function DashboardPage() {
   const [supportLoadingMessages, setSupportLoadingMessages] = useState(false);
   const [supportCreatingConversation, setSupportCreatingConversation] = useState(false);
   const [supportSendingMessage, setSupportSendingMessage] = useState(false);
-  const [supportCreatingCallRequest, setSupportCreatingCallRequest] = useState(false);
   const [supportSubject, setSupportSubject] = useState("");
   const [supportInitialMessage, setSupportInitialMessage] = useState("");
   const [supportPriority, setSupportPriority] = useState<"low" | "normal" | "high" | "urgent">("normal");
@@ -2190,10 +2189,8 @@ export default function DashboardPage() {
   const [supportWhatsappNumber, setSupportWhatsappNumber] = useState("");
   const [supportCallNumber, setSupportCallNumber] = useState("");
   const [supportDraftMessage, setSupportDraftMessage] = useState("");
-  const [supportCallPhone, setSupportCallPhone] = useState("");
-  const [supportCallSchedule, setSupportCallSchedule] = useState("");
-  const [supportCallReason, setSupportCallReason] = useState("");
   const [supportConversationFilter, setSupportConversationFilter] = useState<"all" | "bug" | "support">("all");
+  const [showSupportBugModal, setShowSupportBugModal] = useState(false);
   const [supportBugTitle, setSupportBugTitle] = useState("");
   const [supportBugModule, setSupportBugModule] = useState("examenes");
   const [supportBugSeverity, setSupportBugSeverity] = useState<"low" | "normal" | "high" | "urgent">("high");
@@ -5838,6 +5835,7 @@ export default function DashboardPage() {
       setSupportConversationFilter("bug");
       setSupportFeedback("Reporte de bug enviado a soporte.", "success");
       setSupportSelectedConversationId(created.id);
+      setShowSupportBugModal(false);
       await reloadSupportModule();
     } catch (supportError) {
       if (supportError instanceof Error) {
@@ -5880,42 +5878,6 @@ export default function DashboardPage() {
       }
     } finally {
       setSupportSendingMessage(false);
-    }
-  };
-
-  const onCreateSupportCallRequest = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!user) {
-      return;
-    }
-    const phoneNumber = supportCallPhone.trim();
-    const reason = supportCallReason.trim();
-    if (!phoneNumber || !reason) {
-      setSupportFeedback("Completa telefono y motivo para solicitar llamada.", "error");
-      return;
-    }
-
-    setSupportCreatingCallRequest(true);
-    try {
-      await postJson("/api/v1/support/call-requests", user.token, {
-        userId: user.id,
-        phoneNumber,
-        preferredSchedule: supportCallSchedule.trim() || null,
-        reason,
-      });
-      setSupportCallPhone("");
-      setSupportCallSchedule("");
-      setSupportCallReason("");
-      setSupportFeedback("Solicitud de llamada registrada.", "success");
-      await reloadSupportModule();
-    } catch (supportError) {
-      if (supportError instanceof Error) {
-        setSupportFeedback(supportError.message, "error");
-      } else {
-        setSupportFeedback("No se pudo registrar la solicitud de llamada.", "error");
-      }
-    } finally {
-      setSupportCreatingCallRequest(false);
     }
   };
 
@@ -16121,41 +16083,12 @@ export default function DashboardPage() {
             </article>
           ) : null}
 
-          <div className="grid gap-4 xl:grid-cols-[1.3fr_1.7fr]">
-            <DataCard title="Canales de ayuda">
-              <p className="text-sm text-slate-600">
-                Usa WhatsApp para urgencias y usa tickets para mantener historial y seguimiento.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={onOpenSupportWhatsApp}
-                  className="rounded-lg border border-[#004aad] bg-white px-3 py-2 text-sm font-semibold text-[#004aad] hover:bg-blue-50"
-                >
-                  Abrir WhatsApp
-                </button>
-                <a
-                  href="tel:+51999999999"
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Llamar soporte
-                </a>
-              </div>
-              <p className="mt-3 text-xs text-slate-500">Numero de soporte: +51 999 999 999</p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <article className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Bugs reportados</p>
-                  <p className="mt-1 text-xl font-bold text-rose-800">{bugConversationsCount}</p>
-                </article>
-                <article className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Casos de soporte</p>
-                  <p className="mt-1 text-xl font-bold text-blue-800">{supportConversationsCount}</p>
-                </article>
-              </div>
-            </DataCard>
+          <div className="grid h-full min-h-0 w-full gap-4 lg:grid-cols-[320px_1fr] lg:grid-rows-[minmax(0,1fr)]">
+            <section className="flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-900">Chats soporte</h2>
+              <p className="mt-1 text-xs text-slate-600">Selecciona un ticket para ver su detalle.</p>
 
-            <DataCard title="Mis conversaciones">
-              <div className="mb-3 flex flex-wrap gap-2">
+              <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={() => setSupportConversationFilter("all")}
@@ -16190,7 +16123,8 @@ export default function DashboardPage() {
                   Soporte
                 </button>
               </div>
-              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+
+              <div className="mt-3 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {visibleConversations.length === 0 ? (
                   <article className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
                     No hay conversaciones en este filtro.
@@ -16204,7 +16138,7 @@ export default function DashboardPage() {
                       className={`w-full rounded-lg border px-3 py-2 text-left ${
                         supportSelectedConversationId === conversation.id
                           ? "border-[#004aad] bg-blue-50"
-                          : "border-slate-200 bg-white hover:bg-slate-50"
+                          : "border-slate-200 bg-slate-50 hover:bg-slate-100"
                       }`}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -16232,7 +16166,97 @@ export default function DashboardPage() {
                   ))
                 )}
               </div>
-            </DataCard>
+            </section>
+
+            <section className="flex h-full min-h-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="text-lg font-semibold text-slate-900">Panel soporte</h2>
+              {selectedConversation == null ? (
+                <article className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  Selecciona una conversacion para ver y enviar mensajes.
+                </article>
+              ) : (
+                <div className="mt-3 flex min-h-0 flex-1 flex-col gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-600">
+                      Estado: <span className="font-semibold">{statusLabel(selectedConversation.status)}</span>
+                    </p>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                        conversationTicketType(selectedConversation.ticketType) === "bug"
+                          ? "bg-rose-100 text-rose-700"
+                          : "bg-blue-100 text-blue-700"
+                      }`}
+                    >
+                      {ticketTypeLabel(selectedConversation.ticketType)}
+                    </span>
+                    {supportModule.adminView ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void onAssignSupportConversation(selectedConversation.id)}
+                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Asignarme
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void onCloseSupportConversation(selectedConversation.id)}
+                          className="rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                        >
+                          Cerrar
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="min-h-0 flex-1 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    {supportLoadingMessages ? (
+                      <p className="text-sm text-slate-600">Cargando mensajes...</p>
+                    ) : supportMessages.length === 0 ? (
+                      <p className="text-sm text-slate-600">Sin mensajes por ahora.</p>
+                    ) : (
+                      supportMessages.map((message) => {
+                        const isCurrentUser = message.senderUserId === user.id;
+                        const isAdminMessage = (message.senderRole ?? "").toLowerCase() === "admin";
+                        return (
+                          <article
+                            key={message.id}
+                            className={`max-w-[92%] rounded-xl border px-3 py-2 text-sm ${
+                              isCurrentUser
+                                ? "ml-auto border-blue-200 bg-blue-50 text-slate-800"
+                                : isAdminMessage
+                                  ? "border-emerald-200 bg-emerald-50 text-slate-800"
+                                  : "border-slate-200 bg-white text-slate-800"
+                            }`}
+                          >
+                            <p className="text-xs font-semibold text-slate-600">
+                              {message.senderName?.trim() || "Usuario"}
+                              {isAdminMessage ? " (Admin)" : ""}
+                            </p>
+                            <p className="mt-1 whitespace-pre-wrap">{message.content}</p>
+                          </article>
+                        );
+                      })
+                    )}
+                  </div>
+                  <form onSubmit={onSendSupportMessage} className="flex items-center gap-2">
+                    <input
+                      value={supportDraftMessage}
+                      onChange={(event) => setSupportDraftMessage(event.target.value)}
+                      placeholder={selectedConversationClosed ? "Conversacion cerrada" : "Escribe tu mensaje"}
+                      disabled={selectedConversationClosed || supportSendingMessage}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad] disabled:bg-slate-100"
+                    />
+                    <button
+                      type="submit"
+                      disabled={selectedConversationClosed || supportSendingMessage}
+                      className="rounded-lg bg-[#004aad] px-3 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
+                    >
+                      {supportSendingMessage ? "Enviando..." : "Enviar"}
+                    </button>
+                  </form>
+                </div>
+              )}
+            </section>
           </div>
 
           <div className="grid gap-4 xl:grid-cols-[1.3fr_1.7fr]">
@@ -16301,98 +16325,48 @@ export default function DashboardPage() {
               </form>
             </DataCard>
 
-            <DataCard title={selectedConversation ? `Chat: ${selectedConversation.subject}` : "Chat de soporte"}>
-              {selectedConversation == null ? (
-                <article className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                  Selecciona una conversacion para ver y enviar mensajes.
+            <DataCard title="Canales de ayuda">
+              <p className="text-sm text-slate-600">
+                Usa WhatsApp para urgencias y usa tickets para mantener historial y seguimiento.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onOpenSupportWhatsApp}
+                  className="rounded-lg border border-[#004aad] bg-white px-3 py-2 text-sm font-semibold text-[#004aad] hover:bg-blue-50"
+                >
+                  Abrir WhatsApp
+                </button>
+                <a
+                  href="tel:+51999999999"
+                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                >
+                  Llamar soporte
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setShowSupportBugModal(true)}
+                  className="rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
+                >
+                  Reportar bug
+                </button>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">Numero de soporte: +51 999 999 999</p>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                <article className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Bugs reportados</p>
+                  <p className="mt-1 text-xl font-bold text-rose-800">{bugConversationsCount}</p>
                 </article>
-              ) : (
-                <>
-                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs text-slate-600">
-                      Estado: <span className="font-semibold">{statusLabel(selectedConversation.status)}</span>
-                    </p>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                        conversationTicketType(selectedConversation.ticketType) === "bug"
-                          ? "bg-rose-100 text-rose-700"
-                          : "bg-blue-100 text-blue-700"
-                      }`}
-                    >
-                      {ticketTypeLabel(selectedConversation.ticketType)}
-                    </span>
-                    {supportModule.adminView ? (
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void onAssignSupportConversation(selectedConversation.id)}
-                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          Asignarme
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void onCloseSupportConversation(selectedConversation.id)}
-                          className="rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
-                        >
-                          Cerrar
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="h-64 space-y-2 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    {supportLoadingMessages ? (
-                      <p className="text-sm text-slate-600">Cargando mensajes...</p>
-                    ) : supportMessages.length === 0 ? (
-                      <p className="text-sm text-slate-600">Sin mensajes por ahora.</p>
-                    ) : (
-                      supportMessages.map((message) => {
-                        const isCurrentUser = message.senderUserId === user.id;
-                        const isAdminMessage = (message.senderRole ?? "").toLowerCase() === "admin";
-                        return (
-                          <article
-                            key={message.id}
-                            className={`max-w-[92%] rounded-xl border px-3 py-2 text-sm ${
-                              isCurrentUser
-                                ? "ml-auto border-blue-200 bg-blue-50 text-slate-800"
-                                : isAdminMessage
-                                  ? "border-emerald-200 bg-emerald-50 text-slate-800"
-                                  : "border-slate-200 bg-white text-slate-800"
-                            }`}
-                          >
-                            <p className="text-xs font-semibold text-slate-600">
-                              {message.senderName?.trim() || "Usuario"}
-                              {isAdminMessage ? " (Admin)" : ""}
-                            </p>
-                            <p className="mt-1 whitespace-pre-wrap">{message.content}</p>
-                          </article>
-                        );
-                      })
-                    )}
-                  </div>
-                  <form onSubmit={onSendSupportMessage} className="mt-2 flex items-center gap-2">
-                    <input
-                      value={supportDraftMessage}
-                      onChange={(event) => setSupportDraftMessage(event.target.value)}
-                      placeholder={selectedConversationClosed ? "Conversacion cerrada" : "Escribe tu mensaje"}
-                      disabled={selectedConversationClosed || supportSendingMessage}
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad] disabled:bg-slate-100"
-                    />
-                    <button
-                      type="submit"
-                      disabled={selectedConversationClosed || supportSendingMessage}
-                      className="rounded-lg bg-[#004aad] px-3 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
-                    >
-                      {supportSendingMessage ? "Enviando..." : "Enviar"}
-                    </button>
-                  </form>
-                </>
-              )}
+                <article className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Casos de soporte</p>
+                  <p className="mt-1 text-xl font-bold text-blue-800">{supportConversationsCount}</p>
+                </article>
+              </div>
             </DataCard>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[1.3fr_1.7fr]">
-            <DataCard title="Reportar bug">
+          {showSupportBugModal ? (
+            <ModalShell title="Reportar bug" onClose={() => setShowSupportBugModal(false)}>
               <form onSubmit={onCreateSupportBugReport} className="space-y-3">
                 <input
                   value={supportBugTitle}
@@ -16451,7 +16425,22 @@ export default function DashboardPage() {
                     required
                   />
                 </div>
-                <div className="flex justify-end">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">Buenas practicas</p>
+                  <ul className="mt-2 space-y-1 text-xs text-slate-600">
+                    <li>Incluye pasos exactos para reproducir el bug.</li>
+                    <li>Describe que esperabas que ocurra y que paso realmente.</li>
+                    <li>Marca severidad alta solo si bloquea una funcionalidad clave.</li>
+                  </ul>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowSupportBugModal(false)}
+                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Cancelar
+                  </button>
                   <button
                     type="submit"
                     disabled={supportCreatingConversation}
@@ -16461,120 +16450,8 @@ export default function DashboardPage() {
                   </button>
                 </div>
               </form>
-            </DataCard>
-
-            <DataCard title="Buenas practicas para reportar">
-              <ul className="space-y-2 text-sm text-slate-700">
-                <li>Incluye pasos exactos para reproducir el bug.</li>
-                <li>Describe que esperabas que ocurra y que paso realmente.</li>
-                <li>Si puedes, adjunta captura por chat en el ticket creado.</li>
-                <li>Marca severidad alta solo si bloquea una funcionalidad clave.</li>
-              </ul>
-              <p className="mt-3 text-xs text-slate-500">
-                El reporte se guarda como ticket y el equipo de soporte te responde en el chat interno.
-              </p>
-            </DataCard>
-          </div>
-
-          <div className="grid gap-4 xl:grid-cols-[1.3fr_1.7fr]">
-            <DataCard title="Solicitar llamada">
-              <form onSubmit={onCreateSupportCallRequest} className="space-y-3">
-                <input
-                  value={supportCallPhone}
-                  onChange={(event) => setSupportCallPhone(event.target.value)}
-                  placeholder="Telefono de contacto"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad]"
-                  required
-                />
-                <input
-                  value={supportCallSchedule}
-                  onChange={(event) => setSupportCallSchedule(event.target.value)}
-                  placeholder="Horario preferido (opcional)"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad]"
-                />
-                <textarea
-                  value={supportCallReason}
-                  onChange={(event) => setSupportCallReason(event.target.value)}
-                  placeholder="Motivo de la llamada"
-                  className="h-20 w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad]"
-                  required
-                />
-                <div className="flex justify-end">
-                  <button
-                    type="submit"
-                    disabled={supportCreatingCallRequest}
-                    className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
-                  >
-                    {supportCreatingCallRequest ? "Enviando..." : "Solicitar llamada"}
-                  </button>
-                </div>
-              </form>
-            </DataCard>
-
-            <DataCard title={supportModule.adminView ? "Cola admin de soporte" : "Historial de llamadas"}>
-              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                {(supportModule.adminView ? supportModule.adminQueue : supportModule.callRequests).length === 0 ? (
-                  <article className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                    Sin registros por ahora.
-                  </article>
-                ) : supportModule.adminView ? (
-                  supportModule.adminQueue.map((conversation) => (
-                    <article key={conversation.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-slate-800">{conversation.subject}</p>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
-                            {statusLabel(conversation.status)}
-                          </span>
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                              conversationTicketType(conversation.ticketType) === "bug"
-                                ? "bg-rose-100 text-rose-700"
-                                : "bg-blue-100 text-blue-700"
-                            }`}
-                          >
-                            {ticketTypeLabel(conversation.ticketType)}
-                          </span>
-                        </div>
-                      </div>
-                      <p className="mt-1 text-xs text-slate-600">
-                        {conversation.requesterName} ({conversation.requesterUsername ? `@${conversation.requesterUsername}` : "sin usuario"})
-                      </p>
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSupportSelectedConversationId(conversation.id);
-                            void onAssignSupportConversation(conversation.id);
-                          }}
-                          className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                        >
-                          Asignarme
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void onCloseSupportConversation(conversation.id)}
-                          className="rounded-lg border border-rose-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50"
-                        >
-                          Cerrar
-                        </button>
-                      </div>
-                    </article>
-                  ))
-                ) : (
-                  supportModule.callRequests.map((callRequest) => (
-                    <article key={callRequest.id} className="rounded-lg border border-slate-200 bg-white px-3 py-2">
-                      <p className="text-sm font-semibold text-slate-800">{callRequest.phoneNumber}</p>
-                      <p className="mt-1 text-xs text-slate-600">{callRequest.reason}</p>
-                      {callRequest.preferredSchedule ? (
-                        <p className="mt-1 text-xs text-slate-500">Horario: {callRequest.preferredSchedule}</p>
-                      ) : null}
-                    </article>
-                  ))
-                )}
-              </div>
-            </DataCard>
-          </div>
+            </ModalShell>
+          ) : null}
         </div>
       );
     }
