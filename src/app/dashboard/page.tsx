@@ -2189,8 +2189,9 @@ export default function DashboardPage() {
   const [supportWhatsappNumber, setSupportWhatsappNumber] = useState("");
   const [supportCallNumber, setSupportCallNumber] = useState("");
   const [supportDraftMessage, setSupportDraftMessage] = useState("");
-  const [supportConversationFilter, setSupportConversationFilter] = useState<"all" | "bug" | "support">("all");
+  const [supportConversationFilter, setSupportConversationFilter] = useState<"all" | "open" | "closed">("all");
   const [showSupportDirectModal, setShowSupportDirectModal] = useState(false);
+  const [supportIssueType, setSupportIssueType] = useState<"incident" | "question" | "suggestion">("incident");
   const [showSupportBugModal, setShowSupportBugModal] = useState(false);
   const [supportBugTitle, setSupportBugTitle] = useState("");
   const [supportBugModule, setSupportBugModule] = useState("examenes");
@@ -5763,12 +5764,14 @@ export default function DashboardPage() {
 
     setSupportCreatingConversation(true);
     try {
+      const internalTicketType =
+        supportIssueType === "incident" ? "bug" : supportIssueType === "question" ? "question" : "support";
       const created = (await postJson("/api/v1/support/conversations", user.token, {
         userId: user.id,
         subject,
         priority: supportPriority,
         channelPreference: supportChannel,
-        ticketType: "support",
+        ticketType: internalTicketType,
         moduleKey: active,
         whatsappNumber: supportWhatsappNumber.trim() || null,
         callNumber: supportCallNumber.trim() || null,
@@ -5779,7 +5782,7 @@ export default function DashboardPage() {
       setSupportInitialMessage("");
       setSupportWhatsappNumber("");
       setSupportCallNumber("");
-      setSupportFeedback("Caso de soporte creado.", "success");
+      setSupportFeedback("Ticket creado correctamente.", "success");
       setSupportSelectedConversationId(created.id);
       setShowSupportDirectModal(false);
       await reloadSupportModule();
@@ -5834,7 +5837,7 @@ export default function DashboardPage() {
       setSupportBugSteps("");
       setSupportBugExpected("");
       setSupportBugActual("");
-      setSupportConversationFilter("bug");
+      setSupportConversationFilter("all");
       setSupportFeedback("Reporte de bug enviado a soporte.", "success");
       setSupportSelectedConversationId(created.id);
       setShowSupportBugModal(false);
@@ -16008,19 +16011,19 @@ export default function DashboardPage() {
         }
         return "support";
       };
-      const bugConversationsCount = conversations.filter(
-        (conversation) => conversationTicketType(conversation.ticketType) === "bug",
+      const openConversationsCount = conversations.filter(
+        (conversation) => (conversation.status ?? "").trim().toLowerCase() !== "closed",
       ).length;
-      const supportConversationsCount = conversations.filter(
-        (conversation) => conversationTicketType(conversation.ticketType) !== "bug",
+      const closedConversationsCount = conversations.filter(
+        (conversation) => (conversation.status ?? "").trim().toLowerCase() === "closed",
       ).length;
       const visibleConversations = conversations.filter((conversation) => {
-        const ticketType = conversationTicketType(conversation.ticketType);
-        if (supportConversationFilter === "bug") {
-          return ticketType === "bug";
+        const ticketStatus = (conversation.status ?? "").trim().toLowerCase();
+        if (supportConversationFilter === "open") {
+          return ticketStatus !== "closed";
         }
-        if (supportConversationFilter === "support") {
-          return ticketType !== "bug";
+        if (supportConversationFilter === "closed") {
+          return ticketStatus === "closed";
         }
         return true;
       });
@@ -16072,12 +16075,12 @@ export default function DashboardPage() {
       const ticketTypeLabel = (value: string | null | undefined) => {
         const normalized = conversationTicketType(value);
         if (normalized === "bug") {
-          return "Bug";
+          return "Inconveniente";
         }
         if (normalized === "question") {
           return "Consulta";
         }
-        return "Soporte";
+        return "Solicitud";
       };
 
       return (
@@ -16096,7 +16099,46 @@ export default function DashboardPage() {
             </article>
           ) : null}
 
-          <div className="order-2 grid h-full min-h-0 w-full gap-4 lg:grid-cols-[320px_1fr] lg:grid-rows-[minmax(0,1fr)]">
+          <DataCard title="Canales de ayuda">
+            <p className="text-sm text-slate-600">
+              Usa los canales rapidos para contactar soporte y crea tickets para mantener historial y seguimiento.
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onOpenSupportWhatsApp}
+                className="rounded-lg border border-[#004aad] bg-white px-3 py-2 text-sm font-semibold text-[#004aad] hover:bg-blue-50"
+              >
+                Abrir WhatsApp
+              </button>
+              <a
+                href="tel:+51999999999"
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+              >
+                Llamar soporte
+              </a>
+              <button
+                type="button"
+                onClick={() => setShowSupportDirectModal(true)}
+                className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
+              >
+                Crear ticket
+              </button>
+            </div>
+            <p className="mt-3 text-xs text-slate-500">Numero de soporte: +51 999 999 999</p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <article className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Tickets abiertos</p>
+                <p className="mt-1 text-xl font-bold text-amber-800">{openConversationsCount}</p>
+              </article>
+              <article className="rounded-lg border border-slate-300 bg-slate-100 px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">Tickets cerrados</p>
+                <p className="mt-1 text-xl font-bold text-slate-800">{closedConversationsCount}</p>
+              </article>
+            </div>
+          </DataCard>
+
+          <div className="grid h-full min-h-0 w-full gap-4 lg:grid-cols-[320px_1fr] lg:grid-rows-[minmax(0,1fr)]">
             <section className="flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="text-lg font-semibold text-slate-900">Tickets soporte</h2>
               <p className="mt-1 text-xs text-slate-600">Selecciona un ticket para ver su detalle.</p>
@@ -16115,25 +16157,25 @@ export default function DashboardPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSupportConversationFilter("bug")}
+                  onClick={() => setSupportConversationFilter("open")}
                   className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
-                    supportConversationFilter === "bug"
-                      ? "border-rose-300 bg-rose-50 text-rose-700"
+                    supportConversationFilter === "open"
+                      ? "border-amber-300 bg-amber-50 text-amber-700"
                       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  Bugs
+                  Abiertos
                 </button>
                 <button
                   type="button"
-                  onClick={() => setSupportConversationFilter("support")}
+                  onClick={() => setSupportConversationFilter("closed")}
                   className={`rounded-lg border px-2.5 py-1.5 text-xs font-semibold ${
-                    supportConversationFilter === "support"
-                      ? "border-blue-300 bg-blue-50 text-blue-700"
+                    supportConversationFilter === "closed"
+                      ? "border-slate-500 bg-slate-100 text-slate-700"
                       : "border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
                   }`}
                 >
-                  Soporte
+                  Cerrados
                 </button>
               </div>
 
@@ -16272,61 +16314,24 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          <div className="order-1">
-            <DataCard title="Canales de ayuda">
-              <p className="text-sm text-slate-600">
-                Usa los canales rapidos para contactar soporte y crea tickets para mantener historial y seguimiento.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={onOpenSupportWhatsApp}
-                  className="rounded-lg border border-[#004aad] bg-white px-3 py-2 text-sm font-semibold text-[#004aad] hover:bg-blue-50"
-                >
-                  Abrir WhatsApp
-                </button>
-                <a
-                  href="tel:+51999999999"
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                >
-                  Llamar soporte
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setShowSupportDirectModal(true)}
-                  className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50"
-                >
-                  Soporte directo
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowSupportBugModal(true)}
-                  className="rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 hover:bg-rose-50"
-                >
-                  Reportar bug
-                </button>
-              </div>
-              <p className="mt-3 text-xs text-slate-500">Numero de soporte: +51 999 999 999</p>
-              <div className="mt-4 grid gap-2 sm:grid-cols-2">
-                <article className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-rose-700">Bugs reportados</p>
-                  <p className="mt-1 text-xl font-bold text-rose-800">{bugConversationsCount}</p>
-                </article>
-                <article className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Tickets soporte</p>
-                  <p className="mt-1 text-xl font-bold text-blue-800">{supportConversationsCount}</p>
-                </article>
-              </div>
-            </DataCard>
-          </div>
-
           {showSupportDirectModal ? (
-            <ModalShell title="Soporte directo" onClose={() => setShowSupportDirectModal(false)}>
+            <ModalShell title="Crear ticket" onClose={() => setShowSupportDirectModal(false)}>
               <form onSubmit={onCreateSupportConversation} className="space-y-3">
+                <select
+                  value={supportIssueType}
+                  onChange={(event) =>
+                    setSupportIssueType(event.target.value as "incident" | "question" | "suggestion")
+                  }
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad]"
+                >
+                  <option value="incident">No funciona algo (inconveniente tecnico)</option>
+                  <option value="question">Tengo una duda o consulta</option>
+                  <option value="suggestion">Quiero sugerir una mejora</option>
+                </select>
                 <input
                   value={supportSubject}
                   onChange={(event) => setSupportSubject(event.target.value)}
-                  placeholder="Asunto del caso de soporte"
+                  placeholder="Asunto del ticket"
                   className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad]"
                   required
                 />
@@ -16387,100 +16392,13 @@ export default function DashboardPage() {
                     disabled={supportCreatingConversation}
                     className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
                   >
-                    {supportCreatingConversation ? "Creando..." : "Crear ticket de soporte"}
+                    {supportCreatingConversation ? "Creando..." : "Crear ticket"}
                   </button>
                 </div>
               </form>
             </ModalShell>
           ) : null}
 
-          {showSupportBugModal ? (
-            <ModalShell title="Reportar bug" onClose={() => setShowSupportBugModal(false)}>
-              <form onSubmit={onCreateSupportBugReport} className="space-y-3">
-                <input
-                  value={supportBugTitle}
-                  onChange={(event) => setSupportBugTitle(event.target.value)}
-                  placeholder="Titulo corto del bug"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400"
-                  required
-                />
-                <div className="grid gap-2 md:grid-cols-2">
-                  <select
-                    value={supportBugModule}
-                    onChange={(event) => setSupportBugModule(event.target.value)}
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400"
-                  >
-                    <option value="examenes">Modulo: Examenes</option>
-                    <option value="salas">Modulo: Salas</option>
-                    <option value="horarios">Modulo: Horarios</option>
-                    <option value="cursos">Modulo: Cursos</option>
-                    <option value="ia">Modulo: IA</option>
-                    <option value="perfil">Modulo: Perfil</option>
-                    <option value="dashboard">Modulo: Dashboard</option>
-                  </select>
-                  <select
-                    value={supportBugSeverity}
-                    onChange={(event) =>
-                      setSupportBugSeverity(event.target.value as "low" | "normal" | "high" | "urgent")
-                    }
-                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400"
-                  >
-                    <option value="low">Severidad baja</option>
-                    <option value="normal">Severidad normal</option>
-                    <option value="high">Severidad alta</option>
-                    <option value="urgent">Severidad urgente</option>
-                  </select>
-                </div>
-                <textarea
-                  value={supportBugSteps}
-                  onChange={(event) => setSupportBugSteps(event.target.value)}
-                  placeholder="Pasos para reproducir (1, 2, 3...)"
-                  className="h-20 w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400"
-                  required
-                />
-                <div className="grid gap-2 md:grid-cols-2">
-                  <textarea
-                    value={supportBugExpected}
-                    onChange={(event) => setSupportBugExpected(event.target.value)}
-                    placeholder="Resultado esperado"
-                    className="h-20 w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400"
-                    required
-                  />
-                  <textarea
-                    value={supportBugActual}
-                    onChange={(event) => setSupportBugActual(event.target.value)}
-                    placeholder="Resultado actual"
-                    className="h-20 w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-rose-400"
-                    required
-                  />
-                </div>
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">Buenas practicas</p>
-                  <ul className="mt-2 space-y-1 text-xs text-slate-600">
-                    <li>Incluye pasos exactos para reproducir el bug.</li>
-                    <li>Describe que esperabas que ocurra y que paso realmente.</li>
-                    <li>Marca severidad alta solo si bloquea una funcionalidad clave.</li>
-                  </ul>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowSupportBugModal(false)}
-                    className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={supportCreatingConversation}
-                    className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-70"
-                  >
-                    {supportCreatingConversation ? "Enviando..." : "Enviar reporte de bug"}
-                  </button>
-                </div>
-              </form>
-            </ModalShell>
-          ) : null}
         </div>
       );
     }
