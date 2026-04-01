@@ -8112,17 +8112,7 @@ export default function DashboardPage() {
       groupPracticeState && groupPracticeState.currentQuestion
         ? `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`
         : null;
-    const connectedParticipants = (groupPracticeState?.participants ?? []).filter((participant) =>
-      Boolean(participant.connected),
-    );
-    const answeredUsers = new Set(
-      (groupPracticeState?.currentAnswers ?? [])
-        .filter((answer) => (answer.selectedAnswer ?? "").trim() !== "")
-        .map((answer) => normalizeGroupUserKey(answer.userId)),
-    );
-    const allAnswered =
-      connectedParticipants.length > 0 &&
-      connectedParticipants.every((participant) => answeredUsers.has(normalizeGroupUserKey(participant.userId)));
+    const allAnswered = Boolean(groupPracticeState?.allAnsweredCurrent);
     const expiredForCurrent =
       Boolean(groupTimerExpired) &&
       currentQuestionKey != null &&
@@ -11716,13 +11706,7 @@ export default function DashboardPage() {
 
             return toNumericScore(a.rank) - toNumericScore(b.rank);
           });
-        const connectedParticipantCount = connectedWaitingParticipants.length;
-        const answeredConnectedCount = connectedWaitingParticipants.filter((participant) => {
-          const answer = currentQuestionAnswerByUserId.get(normalizeGroupUserKey(participant.userId));
-          return Boolean((answer?.selectedAnswer ?? "").trim());
-        }).length;
-        const allConnectedAnsweredCurrent =
-          connectedParticipantCount > 0 && answeredConnectedCount >= connectedParticipantCount;
+        const allConnectedAnsweredCurrent = Boolean(groupPracticeState.allAnsweredCurrent);
         const expiredForCurrentQuestion =
           Boolean(groupTimerExpired) &&
           currentGroupQuestionKey != null &&
@@ -13249,8 +13233,12 @@ export default function DashboardPage() {
           ) : null}
 
           {showManageModal && selectedExam ? (
-            <ModalShell title={`Gestionar preguntas: ${selectedExam.name}`} onClose={() => setShowManageModal(false)}>
-              <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
+            <ModalShell
+              title={`Gestionar preguntas: ${selectedExam.name}`}
+              onClose={() => setShowManageModal(false)}
+              panelClassName="w-full max-w-6xl max-h-[92vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-2xl sm:p-4"
+            >
+              <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
                 <form onSubmit={onSaveManualQuestion} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
                   <h4 className="text-sm font-semibold text-slate-800">
                     {editingQuestionId == null ? "Crear pregunta manual" : `Editar pregunta #${editingQuestionId}`}
@@ -13300,7 +13288,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
+                  <div className="grid gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-3">
                     <div>
                       <label className="mb-1 block text-xs font-semibold text-slate-600">Temporizador (segundos)</label>
                       <input
@@ -13419,7 +13407,7 @@ export default function DashboardPage() {
                     />
                   </div>
 
-                  <div className="flex justify-end gap-2">
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                     {editingQuestionId != null ? (
                       <button
                         type="button"
@@ -13446,7 +13434,7 @@ export default function DashboardPage() {
                 </form>
 
                 <div className="rounded-lg border border-slate-200 bg-white p-3">
-                  <div className="mb-3 flex items-center justify-between gap-2">
+                  <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <h4 className="text-sm font-semibold text-slate-800">Preguntas registradas</h4>
                     <select
                       value={manualQuestionOrder}
@@ -13463,7 +13451,7 @@ export default function DashboardPage() {
                       Este examen aun no tiene preguntas.
                     </p>
                   ) : (
-                    <ul className="max-h-[58vh] space-y-2 overflow-auto pr-1">
+                    <ul className="max-h-[45vh] space-y-2 overflow-auto pr-1 sm:max-h-[58vh]">
                       {([...managedExamQuestions]
                         .sort((a, b) =>
                           manualQuestionOrder === "newest" ? b.id - a.id : a.id - b.id,
@@ -18005,15 +17993,20 @@ function ModalShell({
   title,
   onClose,
   children,
+  panelClassName,
 }: {
   title: string;
   onClose: () => void;
   children: ReactNode;
+  panelClassName?: string;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4" onClick={onClose}>
       <div
-        className="w-full max-w-2xl rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
+        className={
+          panelClassName ??
+          "w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
+        }
         onClick={(event) => event.stopPropagation()}
       >
         <div className="mb-3 flex items-center justify-between gap-2">
