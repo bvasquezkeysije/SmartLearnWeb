@@ -1955,6 +1955,8 @@ export default function DashboardPage() {
   const [editingCourseDescription, setEditingCourseDescription] = useState("");
   const [editingCourseCode, setEditingCourseCode] = useState("");
   const [editingCourseVisibility, setEditingCourseVisibility] = useState<"public" | "private">("public");
+  const [editingCourseCoverImageData, setEditingCourseCoverImageData] = useState<string | null>(null);
+  const [editingCourseCoverImageName, setEditingCourseCoverImageName] = useState("");
   const [showManageCourseModal, setShowManageCourseModal] = useState(false);
   const [managingCourseId, setManagingCourseId] = useState<number | null>(null);
   const [managingCoursePriority, setManagingCoursePriority] = useState<
@@ -3773,6 +3775,8 @@ export default function DashboardPage() {
     setEditingCourseDescription(course.description ?? "");
     setEditingCourseCode(course.code?.trim() ? course.code : "");
     setEditingCourseVisibility(course.visibility === "private" ? "private" : "public");
+    setEditingCourseCoverImageData(course.coverImageData?.trim() ? course.coverImageData : null);
+    setEditingCourseCoverImageName(course.coverImageData?.trim() ? "Imagen actual" : "");
     setCourseActionMenuId(null);
     setShowEditCourseModal(true);
   };
@@ -3797,6 +3801,7 @@ export default function DashboardPage() {
         userId: user.id,
         name: normalizedName,
         description: editingCourseDescription.trim() ? editingCourseDescription.trim() : null,
+        coverImageData: editingCourseCoverImageData,
         code: editingCourseCode.trim() ? editingCourseCode.trim() : null,
         visibility: editingCourseVisibility,
       });
@@ -3807,6 +3812,8 @@ export default function DashboardPage() {
       setEditingCourseDescription("");
       setEditingCourseCode("");
       setEditingCourseVisibility("public");
+      setEditingCourseCoverImageData(null);
+      setEditingCourseCoverImageName("");
       setCourseFeedback("Curso actualizado correctamente.", "success");
     } catch (courseUpdateError) {
       if (courseUpdateError instanceof Error) {
@@ -11053,6 +11060,8 @@ export default function DashboardPage() {
                 setEditingCourseDescription("");
                 setEditingCourseCode("");
                 setEditingCourseVisibility("public");
+                setEditingCourseCoverImageData(null);
+                setEditingCourseCoverImageName("");
               }}
             >
               <form onSubmit={onUpdateCourse} className="space-y-3">
@@ -11096,6 +11105,8 @@ export default function DashboardPage() {
                       setEditingCourseDescription("");
                       setEditingCourseCode("");
                       setEditingCourseVisibility("public");
+                      setEditingCourseCoverImageData(null);
+                      setEditingCourseCoverImageName("");
                     }}
                     className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                   >
@@ -16366,6 +16377,58 @@ export default function DashboardPage() {
                     placeholder="Telefono llamada (opcional)"
                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad]"
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="block text-sm font-semibold text-slate-700">Imagen del curso (opcional)</label>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    onChange={async (event) => {
+                      const selectedFile = event.target.files?.[0];
+                      if (!selectedFile) {
+                        return;
+                      }
+
+                      const maxBytes = 5 * 1024 * 1024;
+                      if (selectedFile.size > maxBytes) {
+                        setCourseMessageType("error");
+                        setCourseMessage("La imagen del curso debe pesar maximo 5 MB.");
+                        event.currentTarget.value = "";
+                        return;
+                      }
+
+                      try {
+                        const dataUrl = await fileToDataUrl(selectedFile);
+                        setEditingCourseCoverImageData(dataUrl);
+                        setEditingCourseCoverImageName(selectedFile.name);
+                        setCourseMessage("");
+                      } catch {
+                        setCourseMessageType("error");
+                        setCourseMessage("No se pudo leer la imagen seleccionada.");
+                      }
+                    }}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-[#004aad] file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-[#003b88]"
+                  />
+                  {editingCourseCoverImageData ? (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                      <p className="truncate text-xs text-slate-600">{editingCourseCoverImageName}</p>
+                      <div className="mt-2 h-24 w-36 overflow-hidden rounded-lg border border-slate-200 bg-white">
+                        <img src={editingCourseCoverImageData} alt="Vista previa del curso" className="h-full w-full object-cover" />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingCourseCoverImageData("");
+                          setEditingCourseCoverImageName("");
+                        }}
+                        className="mt-2 rounded-md border border-rose-300 px-2 py-1 text-xs font-semibold text-rose-700 hover:bg-rose-50"
+                      >
+                        Quitar imagen
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">Puedes cargar o reemplazar la portada del curso.</p>
+                  )}
                 </div>
                 <div className="flex justify-end gap-2">
                   <button
