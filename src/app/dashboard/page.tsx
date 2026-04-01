@@ -1699,7 +1699,7 @@ function notificationRequiresInvitationResponse(resourceType: unknown): boolean 
     return false;
   }
   const normalized = resourceType.trim().toLowerCase();
-  return normalized === "exam" || normalized === "schedule";
+  return normalized === "exam" || normalized === "schedule" || normalized === "course_join_request";
 }
 
 function isSupportConversationPayload(value: unknown): value is SupportConversationItem {
@@ -5581,6 +5581,10 @@ export default function DashboardPage() {
     if (!user || notificationActionLoadingId != null) {
       return;
     }
+    const resourceType = (notification.resourceType ?? "").trim().toLowerCase();
+    if (resourceType === "course_join_request" || notification.id <= 0) {
+      return;
+    }
     setNotificationActionLoadingId(notification.id);
     try {
       const updated = (await patchJson(
@@ -5600,7 +5604,16 @@ export default function DashboardPage() {
     if (!user || markingAllNotifications || notificationActionLoadingId != null) {
       return;
     }
-    const unreadNotifications = homeShareNotifications.filter((notification) => !notification.readAt);
+    const unreadNotifications = homeShareNotifications.filter((notification) => {
+      if (notification.readAt) {
+        return false;
+      }
+      const resourceType = (notification.resourceType ?? "").trim().toLowerCase();
+      if (resourceType === "course_join_request" || notification.id <= 0) {
+        return false;
+      }
+      return true;
+    });
     if (unreadNotifications.length === 0) {
       return;
     }
@@ -5641,14 +5654,47 @@ export default function DashboardPage() {
     }
     setNotificationActionLoadingId(notification.id);
     try {
-      const updated = (await patchJson(
-        `/api/v1/share-links/notifications/${notification.id}/accept?userId=${user.id}`,
-        user.token,
-        {},
-      )) as ShareNotificationItem;
+      const resourceType = (notification.resourceType ?? "").trim().toLowerCase();
+      let updated: ShareNotificationItem;
+      if (resourceType === "course_join_request") {
+        const requesterId = Number(notification.senderUserId);
+        const courseId = Number(notification.resourceId);
+        if (!Number.isFinite(requesterId) || requesterId <= 0 || !Number.isFinite(courseId) || courseId <= 0) {
+          throw new Error("Solicitud invalida para aprobar.");
+        }
+        await patchJson(
+          `/api/v1/courses/${courseId}/join-requests/${requesterId}/accept?userId=${user.id}`,
+          user.token,
+          {},
+        );
+        updated = {
+          ...notification,
+          invitationStatus: "accepted",
+          invitationRespondedAt: new Date().toISOString(),
+          readAt: new Date().toISOString(),
+        };
+      } else {
+        updated = (await patchJson(
+          `/api/v1/share-links/notifications/${notification.id}/accept?userId=${user.id}`,
+          user.token,
+          {},
+        )) as ShareNotificationItem;
+      }
       syncUpdatedNotification(updated);
-      const resourceType = (updated.resourceType ?? notification.resourceType ?? "").trim().toLowerCase();
-      if (resourceType === "exam") {
+      if (resourceType === "course_join_request") {
+        if (active === "notificaciones") {
+          const notificationsPayload = await fetchJson(`/api/v1/share-links/notifications?userId=${user.id}`, user.token);
+          setPayload(
+            Array.isArray(notificationsPayload)
+              ? notificationsPayload.filter((item) => isShareNotificationPayload(item))
+              : [],
+          );
+        }
+        return;
+      }
+
+      const updatedResourceType = (updated.resourceType ?? notification.resourceType ?? "").trim().toLowerCase();
+      if (updatedResourceType === "exam") {
         const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
         const examName = updated.resourceName?.trim() || notification.resourceName?.trim() || "Examen";
         setClaimedExamInvitePrompt({
@@ -5661,7 +5707,7 @@ export default function DashboardPage() {
         return;
       }
 
-      if (resourceType === "schedule") {
+      if (updatedResourceType === "schedule") {
         const scheduleId = Number(updated.resourceId ?? notification.resourceId);
         if (Number.isFinite(scheduleId) && scheduleId > 0) {
           setSchedulePreferredProfileId(scheduleId);
@@ -5692,12 +5738,43 @@ export default function DashboardPage() {
     }
     setNotificationActionLoadingId(notification.id);
     try {
-      const updated = (await patchJson(
-        `/api/v1/share-links/notifications/${notification.id}/reject?userId=${user.id}`,
-        user.token,
-        {},
-      )) as ShareNotificationItem;
+      const resourceType = (notification.resourceType ?? "").trim().toLowerCase();
+      let updated: ShareNotificationItem;
+      if (resourceType === "course_join_request") {
+        const requesterId = Number(notification.senderUserId);
+        const courseId = Number(notification.resourceId);
+        if (!Number.isFinite(requesterId) || requesterId <= 0 || !Number.isFinite(courseId) || courseId <= 0) {
+          throw new Error("Solicitud invalida para rechazar.");
+        }
+        await patchJson(
+          `/api/v1/courses/${courseId}/join-requests/${requesterId}/reject?userId=${user.id}`,
+          user.token,
+          {},
+        );
+        updated = {
+          ...notification,
+          invitationStatus: "rejected",
+          invitationRespondedAt: new Date().toISOString(),
+          readAt: new Date().toISOString(),
+        };
+      } else {
+        updated = (await patchJson(
+          `/api/v1/share-links/notifications/${notification.id}/reject?userId=${user.id}`,
+          user.token,
+          {},
+        )) as ShareNotificationItem;
+      }
       syncUpdatedNotification(updated);
+      if (resourceType === "course_join_request") {
+        if (active === "notificaciones") {
+          const notificationsPayload = await fetchJson(`/api/v1/share-links/notifications?userId=${user.id}`, user.token);
+          setPayload(
+            Array.isArray(notificationsPayload)
+              ? notificationsPayload.filter((item) => isShareNotificationPayload(item))
+              : [],
+          );
+        }
+      }
     } catch (rejectError) {
       if (rejectError instanceof Error) {
         setError(rejectError.message);
@@ -5714,12 +5791,18 @@ export default function DashboardPage() {
       return;
     }
     const resourceType = (notification.resourceType ?? "").trim().toLowerCase();
+    if (resourceType === "course_join_request") {
+      setError("Esta solicitud se gestiona desde Aceptar o Rechazar.");
+      return;
+    }
     const invitationStatus = normalizeInvitationStatus(notification.invitationStatus);
     if (notificationRequiresInvitationResponse(resourceType) && invitationStatus === "pending") {
       setError(
         resourceType === "exam"
           ? "Primero acepta o rechaza la invitacion del examen."
-          : "Primero acepta o rechaza la invitacion del horario.",
+          : resourceType === "schedule"
+            ? "Primero acepta o rechaza la invitacion del horario."
+            : "Primero acepta o rechaza la solicitud del curso.",
       );
       return;
     }
@@ -9538,8 +9621,10 @@ export default function DashboardPage() {
                         ? "Examen"
                         : notification.resourceType === "course"
                           ? "Curso"
-                          : notification.resourceType === "schedule"
+                        : notification.resourceType === "schedule"
                             ? "Horario"
+                          : notification.resourceType === "course_join_request"
+                            ? "Solicitud de curso"
                           : notification.resourceType === "sala"
                             ? "Sala"
                             : "Recurso";
@@ -9600,7 +9685,7 @@ export default function DashboardPage() {
                               {notification.resourceType === "exam" ? "Ver examen" : notification.resourceType === "schedule" ? "Ver horario" : "Abrir"}
                             </button>
                           ) : null}
-                          {!isRead ? (
+                          {!isRead && (notification.resourceType ?? "").trim().toLowerCase() !== "course_join_request" ? (
                             <button
                               type="button"
                               disabled={notificationActionLoadingId === notification.id}
@@ -15511,6 +15596,8 @@ export default function DashboardPage() {
                         ? "Curso"
                         : notification.resourceType === "schedule"
                           ? "Horario"
+                        : notification.resourceType === "course_join_request"
+                          ? "Solicitud de curso"
                         : notification.resourceType === "sala"
                           ? "Sala"
                           : "Recurso";
@@ -15608,7 +15695,7 @@ export default function DashboardPage() {
                             Copiar enlace
                           </button>
                         ) : null}
-                        {!isRead ? (
+                        {!isRead && (notification.resourceType ?? "").trim().toLowerCase() !== "course_join_request" ? (
                           <button
                             type="button"
                             disabled={notificationActionLoadingId === notification.id}
@@ -17133,6 +17220,8 @@ export default function DashboardPage() {
                                 ? "Curso"
                                 : notification.resourceType === "schedule"
                                   ? "Horario"
+                                : notification.resourceType === "course_join_request"
+                                  ? "Solicitud de curso"
                                 : notification.resourceType === "sala"
                                   ? "Sala"
                                   : "Recurso";
@@ -17195,7 +17284,8 @@ export default function DashboardPage() {
                                         : "Abrir"}
                                   </button>
                                 ) : null}
-                                {!isRead ? (
+                                {!isRead &&
+                                (notification.resourceType ?? "").trim().toLowerCase() !== "course_join_request" ? (
                                   <button
                                     type="button"
                                     disabled={
