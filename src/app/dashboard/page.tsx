@@ -337,6 +337,12 @@ type CourseSessionContentPracticeStartResponse = {
   examName: string;
 };
 
+type ExamListVisibilityResponse = {
+  examId: number;
+  userId: number;
+  visible: boolean;
+};
+
 type CourseSessionItem = {
   id: number;
   name: string;
@@ -1976,6 +1982,8 @@ export default function DashboardPage() {
   const [openedCourseTab, setOpenedCourseTab] = useState<"curso" | "participantes" | "calificaciones" | "competencias">(
     "curso",
   );
+  const [anchoredExamVisibilityById, setAnchoredExamVisibilityById] = useState<Record<number, boolean>>({});
+  const [anchoredExamVisibilityLoadingById, setAnchoredExamVisibilityLoadingById] = useState<Record<number, boolean>>({});
   const [courseYearFilter, setCourseYearFilter] = useState("all");
   const [courseProgressFilter, setCourseProgressFilter] = useState("all");
   const [courseScopeFilter, setCourseScopeFilter] = useState<"created" | "enrolled" | "explore">("created");
@@ -4262,7 +4270,7 @@ export default function DashboardPage() {
       if (sessionContentType === "examen") {
         const sourceExamId = Number(sessionExamSourceId);
         if (!Number.isFinite(sourceExamId) || sourceExamId <= 0) {
-          setCourseFeedback("Selecciona un examen para clonar en el contenido.", "error");
+          setCourseFeedback("Selecciona un examen para anclar en el contenido.", "error");
           return;
         }
         body.type = "exam";
@@ -4333,7 +4341,7 @@ export default function DashboardPage() {
       const exams = await refreshExams();
       const targetExam = exams.find((item) => item.id === startResponse.examId);
       if (!targetExam) {
-        setExamFeedback("No se encontro el examen clonado en tu lista.", "error");
+        setExamFeedback("No se encontro el examen anclado en tu lista.", "error");
         return;
       }
       if ((targetExam.participantsCount ?? 1) <= 1) {
@@ -4349,6 +4357,44 @@ export default function DashboardPage() {
       } else {
         setExamFeedback("No se pudo iniciar el repaso desde el contenido del curso.", "error");
       }
+    }
+  };
+
+  const onToggleAnchoredExamVisibility = async (content: CourseSessionContentItem) => {
+    if (!user) {
+      return;
+    }
+    const examId = Number(content.sourceExamId ?? 0);
+    if (!Number.isFinite(examId) || examId <= 0) {
+      setCourseFeedback("Este contenido no tiene un examen valido para cambiar visibilidad.", "error");
+      return;
+    }
+
+    const currentVisible = Boolean(anchoredExamVisibilityById[examId]);
+    const targetVisible = !currentVisible;
+    setAnchoredExamVisibilityLoadingById((previous) => ({ ...previous, [examId]: true }));
+
+    try {
+      await patchJson(`/api/v1/ia/exams/${examId}/list-visibility`, user.token, {
+        userId: user.id,
+        visible: targetVisible,
+      });
+      setAnchoredExamVisibilityById((previous) => ({ ...previous, [examId]: targetVisible }));
+      await refreshExams();
+      setCourseFeedback(
+        targetVisible
+          ? "El examen anclado ahora se muestra en tu lista de examenes."
+          : "El examen anclado se oculto de tu lista de examenes.",
+        "success",
+      );
+    } catch (visibilityError) {
+      if (visibilityError instanceof Error) {
+        setCourseFeedback(visibilityError.message, "error");
+      } else {
+        setCourseFeedback("No se pudo cambiar la visibilidad del examen anclado.", "error");
+      }
+    } finally {
+      setAnchoredExamVisibilityLoadingById((previous) => ({ ...previous, [examId]: false }));
     }
   };
 
@@ -6405,6 +6451,69 @@ export default function DashboardPage() {
     setPayload(exams);
     return exams;
   };
+
+  useEffect(() => {
+    if (!user || active !== "cursos" || openedCourseId == null || !Array.isArray(payload)) {
+      return;
+    }
+
+    const courseModule = parseCourseModulePayload(payload);
+    const openedCourse = courseModule.courses.find((course) => course.id === openedCourseId);
+    if (!openedCourse) {
+      return;
+    }
+
+    const examIds = new Set<number>();
+    for (const session of openedCourse.sessions ?? []) {
+      for (const content of session.contents ?? []) {
+        const type = (content.type ?? "").toLowerCase();
+        if ((type === "exam" || type === "examen") && typeof content.sourceExamId === "number" && content.sourceExamId > 0) {
+          examIds.add(content.sourceExamId);
+        }
+      }
+    }
+    if (examIds.size === 0) {
+      return;
+    }
+
+    const missingIds = Array.from(examIds).filter((examId) => !(examId in anchoredExamVisibilityById));
+    if (missingIds.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const responses = await Promise.all(
+          missingIds.map(
+            (examId) =>
+              fetchJson(
+                `/api/v1/ia/exams/${examId}/list-visibility?userId=${user.id}`,
+                user.token,
+              ) as Promise<ExamListVisibilityResponse>,
+          ),
+        );
+        if (cancelled) {
+          return;
+        }
+        setAnchoredExamVisibilityById((previous) => {
+          const next = { ...previous };
+          for (const response of responses) {
+            if (typeof response.examId === "number") {
+              next[response.examId] = Boolean(response.visible);
+            }
+          }
+          return next;
+        });
+      } catch {
+        // silencio: se resolvera al pulsar el boton o en el siguiente intento
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user, active, openedCourseId, payload, anchoredExamVisibilityById]);
 
   useEffect(() => {
     if (!user || !showGroupPracticeRunnerModal || !selectedExam || !groupPracticeState) {
@@ -10298,7 +10407,7 @@ export default function DashboardPage() {
                                                   {contentType === "exam" ? (
                                                     <div className="mt-1 flex flex-wrap items-center gap-2">
                                                       <span className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                                                        {content.sourceExamName?.trim() || "Examen asociado"}
+                                                        {content.sourceExamName?.trim() || "Examen anclado"}
                                                       </span>
                                                       <button
                                                         type="button"
@@ -10307,6 +10416,20 @@ export default function DashboardPage() {
                                                       >
                                                         Iniciar repaso
                                                       </button>
+                                                      {!openedCourseIsOwner && typeof content.sourceExamId === "number" && content.sourceExamId > 0 ? (
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => void onToggleAnchoredExamVisibility(content)}
+                                                          disabled={Boolean(anchoredExamVisibilityLoadingById[content.sourceExamId])}
+                                                          className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                                                        >
+                                                          {Boolean(anchoredExamVisibilityLoadingById[content.sourceExamId])
+                                                            ? "Actualizando..."
+                                                            : Boolean(anchoredExamVisibilityById[content.sourceExamId])
+                                                              ? "Ocultar de Examenes"
+                                                              : "Visualizar en Examenes"}
+                                                        </button>
+                                                      ) : null}
                                                     </div>
                                                   ) : null}
                                                 </div>
@@ -11046,7 +11169,7 @@ export default function DashboardPage() {
                   <option value="video">Enlace de video</option>
                   <option value="pdf">Documento PDF</option>
                   <option value="word">Documento Word</option>
-                  <option value="examen">Clonar examen</option>
+                  <option value="examen">Anclar examen</option>
                   <option value="portada">Imagen de portada</option>
                 </select>
 
@@ -11090,7 +11213,7 @@ export default function DashboardPage() {
                         </option>
                       ))}
                     </select>
-                    <p className="text-xs text-slate-500">Se clonara este examen para cada usuario al iniciar repaso.</p>
+                    <p className="text-xs text-slate-500">Este examen quedara anclado y se usara con la misma configuracion original.</p>
                   </div>
                 ) : null}
 
