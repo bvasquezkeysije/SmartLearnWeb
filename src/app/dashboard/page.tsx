@@ -352,6 +352,7 @@ type CourseItem = {
   coverImageData?: string | null;
   code?: string | null;
   visibility?: "public" | "private" | null;
+  joinMode?: "open" | "request" | null;
   priority?: "very_important" | "important" | "low_important" | "optional" | null;
   sortOrder?: number | null;
   ownerUserId?: number | null;
@@ -1446,6 +1447,7 @@ function isCoursePayload(value: unknown): value is CourseItem {
     typeof record.name === "string" &&
     (!("code" in record) || record.code == null || typeof record.code === "string") &&
     (!("visibility" in record) || record.visibility == null || record.visibility === "public" || record.visibility === "private") &&
+    (!("joinMode" in record) || record.joinMode == null || record.joinMode === "open" || record.joinMode === "request") &&
     (!("priority" in record) ||
       record.priority == null ||
       record.priority === "very_important" ||
@@ -1919,6 +1921,7 @@ export default function DashboardPage() {
   const [courseDescription, setCourseDescription] = useState("");
   const [courseCode, setCourseCode] = useState("");
   const [courseVisibility, setCourseVisibility] = useState<"public" | "private">("public");
+  const [courseJoinMode, setCourseJoinMode] = useState<"open" | "request">("open");
   const [courseCoverImageData, setCourseCoverImageData] = useState<string | null>(null);
   const [courseCoverImageName, setCourseCoverImageName] = useState("");
   const [courseSessionName, setCourseSessionName] = useState("");
@@ -1955,6 +1958,7 @@ export default function DashboardPage() {
   const [editingCourseDescription, setEditingCourseDescription] = useState("");
   const [editingCourseCode, setEditingCourseCode] = useState("");
   const [editingCourseVisibility, setEditingCourseVisibility] = useState<"public" | "private">("public");
+  const [editingCourseJoinMode, setEditingCourseJoinMode] = useState<"open" | "request">("open");
   const [editingCourseCoverImageData, setEditingCourseCoverImageData] = useState<string | null>(null);
   const [editingCourseCoverImageName, setEditingCourseCoverImageName] = useState("");
   const [showManageCourseModal, setShowManageCourseModal] = useState(false);
@@ -1966,6 +1970,8 @@ export default function DashboardPage() {
   const [showDeleteCourseModal, setShowDeleteCourseModal] = useState(false);
   const [deleteCourseTarget, setDeleteCourseTarget] = useState<CourseItem | null>(null);
   const [courseActionMenuId, setCourseActionMenuId] = useState<number | null>(null);
+  const [courseJoinTarget, setCourseJoinTarget] = useState<CourseItem | null>(null);
+  const [joiningCourse, setJoiningCourse] = useState(false);
   const [openedCourseId, setOpenedCourseId] = useState<number | null>(null);
   const [openedCourseTab, setOpenedCourseTab] = useState<"curso" | "participantes" | "calificaciones" | "competencias">(
     "curso",
@@ -3749,11 +3755,13 @@ export default function DashboardPage() {
         coverImageData: courseCoverImageData?.trim() ? courseCoverImageData.trim() : null,
         code: courseCode.trim() ? courseCode.trim() : null,
         visibility: courseVisibility,
+        joinMode: courseJoinMode,
       });
       setCourseName("");
       setCourseDescription("");
       setCourseCode("");
       setCourseVisibility("public");
+      setCourseJoinMode("open");
       setCourseCoverImageData(null);
       setCourseCoverImageName("");
       setShowCreateCourseModal(false);
@@ -3776,6 +3784,7 @@ export default function DashboardPage() {
     setEditingCourseDescription(course.description ?? "");
     setEditingCourseCode(course.code?.trim() ? course.code : "");
     setEditingCourseVisibility(course.visibility === "private" ? "private" : "public");
+    setEditingCourseJoinMode(course.joinMode === "request" ? "request" : "open");
     setEditingCourseCoverImageData(course.coverImageData?.trim() ? course.coverImageData : null);
     setEditingCourseCoverImageName(course.coverImageData?.trim() ? "Imagen actual" : "");
     setCourseActionMenuId(null);
@@ -3805,6 +3814,7 @@ export default function DashboardPage() {
         coverImageData: editingCourseCoverImageData,
         code: editingCourseCode.trim() ? editingCourseCode.trim() : null,
         visibility: editingCourseVisibility,
+        joinMode: editingCourseJoinMode,
       });
       await refreshCourses();
       setShowEditCourseModal(false);
@@ -3813,6 +3823,7 @@ export default function DashboardPage() {
       setEditingCourseDescription("");
       setEditingCourseCode("");
       setEditingCourseVisibility("public");
+      setEditingCourseJoinMode("open");
       setEditingCourseCoverImageData(null);
       setEditingCourseCoverImageName("");
       setCourseFeedback("Curso actualizado correctamente.", "success");
@@ -3831,6 +3842,40 @@ export default function DashboardPage() {
     setDeleteCourseTarget(course);
     setCourseActionMenuId(null);
     setShowDeleteCourseModal(true);
+  };
+
+  const onJoinPublicCourse = async () => {
+    if (!user || !courseJoinTarget) {
+      return;
+    }
+
+    setJoiningCourse(true);
+    try {
+      const result = (await postJson(`/api/v1/courses/${courseJoinTarget.id}/join`, user.token, {
+        userId: user.id,
+      })) as { status?: string; message?: string };
+      setCourseFeedback(
+        result.message?.trim() ||
+          (result.status === "requested"
+            ? "Solicitud enviada al creador."
+            : "Te uniste al curso correctamente."),
+        "success",
+      );
+      setCourseJoinTarget(null);
+      await refreshCourses();
+      if (result.status === "joined" || result.status === "already_member") {
+        setOpenedCourseId(courseJoinTarget.id);
+        setOpenedCourseTab("curso");
+      }
+    } catch (joinError) {
+      if (joinError instanceof Error) {
+        setCourseFeedback(joinError.message, "error");
+      } else {
+        setCourseFeedback("No se pudo procesar la solicitud al curso.", "error");
+      }
+    } finally {
+      setJoiningCourse(false);
+    }
   };
 
   const onConfirmDeleteCourse = async () => {
@@ -9660,7 +9705,10 @@ export default function DashboardPage() {
         if (resolveCourseOwner(course)) {
           return true;
         }
-        return (course.participants ?? []).some((participant) => participant.userId === user.id);
+        return (course.participants ?? []).some(
+          (participant) =>
+            participant.userId === user.id && String(participant.role ?? "").toLowerCase() !== "pending",
+        );
       };
       const courseScopeCounts = courses.reduce(
         (acc, course) => {
@@ -9867,15 +9915,16 @@ export default function DashboardPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setCourseName("");
-                    setCourseDescription("");
-                    setCourseCode("");
-                    setCourseVisibility("public");
-                    setCourseCoverImageData(null);
-                    setCourseCoverImageName("");
-                    setShowCreateCourseModal(true);
-                  }}
+                onClick={() => {
+                  setCourseName("");
+                  setCourseDescription("");
+                  setCourseCode("");
+                  setCourseVisibility("public");
+                  setCourseJoinMode("open");
+                  setCourseCoverImageData(null);
+                  setCourseCoverImageName("");
+                  setShowCreateCourseModal(true);
+                }}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                 >
                   Crear curso
@@ -10288,6 +10337,8 @@ export default function DashboardPage() {
                                             ? "Editor"
                                             : participantRole === "assistant"
                                               ? "Assistant"
+                                              : participantRole === "pending"
+                                                ? "Solicitud pendiente"
                                               : "Viewer"}
                                       </span>
                                       <span className="text-[11px] text-slate-500">
@@ -10498,8 +10549,14 @@ export default function DashboardPage() {
                       {(() => {
                         const isOwnerCourse =
                           user == null ? true : course.ownerUserId == null || course.ownerUserId === user.id;
+                        const myMembership =
+                          user == null ? null : (course.participants ?? []).find((participant) => participant.userId === user.id) ?? null;
+                        const membershipRole = (myMembership?.role ?? "").toLowerCase();
+                        const isPendingJoin = !isOwnerCourse && membershipRole === "pending";
+                        const isEnrolledCourse = isOwnerCourse || (!!myMembership && membershipRole !== "pending");
                         const courseCode = course.code?.trim() ? course.code.trim() : `CURSO-${course.id}`;
                         const courseVisibility = course.visibility === "private" ? "private" : "public";
+                        const courseJoinMode = course.joinMode === "request" ? "request" : "open";
                         const coursePriority = resolveCoursePriority(course);
                         const courseCustomOrder = resolveCourseSortOrder(course);
                         return (
@@ -10520,6 +10577,14 @@ export default function DashboardPage() {
                           <button
                             type="button"
                             onClick={() => {
+                              if (!isEnrolledCourse) {
+                                if (courseVisibility === "public") {
+                                  setCourseJoinTarget(course);
+                                } else {
+                                  setCourseFeedback("No tienes acceso a este curso.", "error");
+                                }
+                                return;
+                              }
                               setOpenedCourseId(course.id);
                               setOpenedCourseTab("curso");
                               setCourseActionMenuId(null);
@@ -10547,6 +10612,11 @@ export default function DashboardPage() {
                             >
                               {courseVisibility === "public" ? "Publico" : "Privado"}
                             </span>
+                            {courseVisibility === "public" ? (
+                              <span className="rounded-full border border-violet-200 bg-violet-50 px-2 py-0.5 text-xs font-semibold text-violet-700">
+                                {courseJoinMode === "request" ? "Ingreso con solicitud" : "Ingreso directo"}
+                              </span>
+                            ) : null}
                             <span className="rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
                               {coursePriorityLabel(coursePriority)}
                             </span>
@@ -10554,9 +10624,14 @@ export default function DashboardPage() {
                               Orden: {courseCustomOrder}
                             </span>
                             <p className="text-sm text-slate-600">Examenes: {countCourseExams(course)}</p>
-                            {!isOwnerCourse ? (
+                            {!isOwnerCourse && isEnrolledCourse ? (
                               <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                                Compartido contigo
+                                Inscrito
+                              </span>
+                            ) : null}
+                            {isPendingJoin ? (
+                              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                                Solicitud enviada
                               </span>
                             ) : null}
                           </div>
@@ -10639,6 +10714,7 @@ export default function DashboardPage() {
                 setCourseDescription("");
                 setCourseCode("");
                 setCourseVisibility("public");
+                setCourseJoinMode("open");
                 setCourseCoverImageData(null);
                 setCourseCoverImageName("");
               }}
@@ -10658,7 +10734,7 @@ export default function DashboardPage() {
                   rows={4}
                   className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
                 />
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-2 md:grid-cols-3">
                   <input
                     value={courseCode}
                     onChange={(event) => setCourseCode(event.target.value.toUpperCase())}
@@ -10672,6 +10748,14 @@ export default function DashboardPage() {
                   >
                     <option value="public">Publico</option>
                     <option value="private">Privado</option>
+                  </select>
+                  <select
+                    value={courseJoinMode}
+                    onChange={(event) => setCourseJoinMode(event.target.value as "open" | "request")}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                  >
+                    <option value="open">Ingreso publico directo</option>
+                    <option value="request">Publico con solicitud</option>
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -10732,6 +10816,7 @@ export default function DashboardPage() {
                       setCourseDescription("");
                       setCourseCode("");
                       setCourseVisibility("public");
+                      setCourseJoinMode("open");
                       setCourseCoverImageData(null);
                       setCourseCoverImageName("");
                     }}
@@ -11072,6 +11157,7 @@ export default function DashboardPage() {
                 setEditingCourseDescription("");
                 setEditingCourseCode("");
                 setEditingCourseVisibility("public");
+                setEditingCourseJoinMode("open");
                 setEditingCourseCoverImageData(null);
                 setEditingCourseCoverImageName("");
               }}
@@ -11091,7 +11177,7 @@ export default function DashboardPage() {
                   rows={4}
                   className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
                 />
-                <div className="grid gap-2 md:grid-cols-2">
+                <div className="grid gap-2 md:grid-cols-3">
                   <input
                     value={editingCourseCode}
                     onChange={(event) => setEditingCourseCode(event.target.value.toUpperCase())}
@@ -11105,6 +11191,14 @@ export default function DashboardPage() {
                   >
                     <option value="public">Publico</option>
                     <option value="private">Privado</option>
+                  </select>
+                  <select
+                    value={editingCourseJoinMode}
+                    onChange={(event) => setEditingCourseJoinMode(event.target.value as "open" | "request")}
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                  >
+                    <option value="open">Ingreso publico directo</option>
+                    <option value="request">Publico con solicitud</option>
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -11173,6 +11267,7 @@ export default function DashboardPage() {
                       setEditingCourseDescription("");
                       setEditingCourseCode("");
                       setEditingCourseVisibility("public");
+                      setEditingCourseJoinMode("open");
                       setEditingCourseCoverImageData(null);
                       setEditingCourseCoverImageName("");
                     }}
@@ -11189,6 +11284,51 @@ export default function DashboardPage() {
                   </button>
                 </div>
               </form>
+            </ModalShell>
+          ) : null}
+
+          {courseJoinTarget ? (
+            <ModalShell
+              title="Unirme al curso"
+              onClose={() => {
+                if (joiningCourse) {
+                  return;
+                }
+                setCourseJoinTarget(null);
+              }}
+            >
+              <div className="space-y-3">
+                <p className="text-sm text-slate-700">
+                  Estas por unirte a <span className="font-semibold">{courseJoinTarget.name}</span>.
+                </p>
+                <p className="text-sm text-slate-600">
+                  {courseJoinTarget.joinMode === "request"
+                    ? "Este curso publico requiere aprobacion del creador."
+                    : "El ingreso es directo para este curso publico."}
+                </p>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCourseJoinTarget(null)}
+                    disabled={joiningCourse}
+                    className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-70"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void onJoinPublicCourse()}
+                    disabled={joiningCourse}
+                    className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
+                  >
+                    {joiningCourse
+                      ? "Procesando..."
+                      : courseJoinTarget.joinMode === "request"
+                        ? "Enviar solicitud"
+                        : "Unirme ahora"}
+                  </button>
+                </div>
+              </div>
             </ModalShell>
           ) : null}
 
