@@ -1972,7 +1972,8 @@ export default function DashboardPage() {
   );
   const [courseYearFilter, setCourseYearFilter] = useState("all");
   const [courseProgressFilter, setCourseProgressFilter] = useState("all");
-  const [courseScopeFilter, setCourseScopeFilter] = useState<"all" | "mine" | "shared" | "public" | "private">("all");
+  const [courseScopeFilter, setCourseScopeFilter] = useState<"created" | "enrolled" | "explore">("created");
+  const [courseFiltersOpen, setCourseFiltersOpen] = useState(false);
   const [courseSearchQuery, setCourseSearchQuery] = useState("");
   const [courseSortMode, setCourseSortMode] = useState<"name_asc" | "name_desc" | "newest" | "oldest">("name_asc");
   const [savingCourseId, setSavingCourseId] = useState<number | null>(null);
@@ -9652,44 +9653,45 @@ export default function DashboardPage() {
       };
       const resolveCourseOwner = (course: CourseItem): boolean =>
         user == null ? true : course.ownerUserId == null || course.ownerUserId === user.id;
+      const resolveCourseEnrolled = (course: CourseItem): boolean => {
+        if (!user) {
+          return false;
+        }
+        if (resolveCourseOwner(course)) {
+          return true;
+        }
+        return (course.participants ?? []).some((participant) => participant.userId === user.id);
+      };
       const courseScopeCounts = courses.reduce(
         (acc, course) => {
-          const visibility = resolveCourseVisibility(course);
           const isOwner = resolveCourseOwner(course);
-          acc.all += 1;
+          const isEnrolled = resolveCourseEnrolled(course);
+          const isCommunityPublic = resolveCourseVisibility(course) === "public" && !isOwner;
           if (isOwner) {
-            acc.mine += 1;
+            acc.created += 1;
           }
-          if (!isOwner && visibility === "private") {
-            acc.shared += 1;
+          if (isEnrolled) {
+            acc.enrolled += 1;
           }
-          if (visibility === "public") {
-            acc.public += 1;
-          }
-          if (visibility === "private") {
-            acc.private += 1;
+          if (isCommunityPublic) {
+            acc.explore += 1;
           }
           return acc;
         },
-        { all: 0, mine: 0, shared: 0, public: 0, private: 0 },
+        { created: 0, enrolled: 0, explore: 0 },
       );
       const filteredCourses = [...courses]
         .filter((course) => {
-          const visibility = resolveCourseVisibility(course);
           const isOwner = resolveCourseOwner(course);
-          if (courseScopeFilter === "mine") {
+          const isEnrolled = resolveCourseEnrolled(course);
+          const isCommunityPublic = resolveCourseVisibility(course) === "public" && !isOwner;
+          if (courseScopeFilter === "created") {
             return isOwner;
           }
-          if (courseScopeFilter === "shared") {
-            return !isOwner && visibility === "private";
+          if (courseScopeFilter === "enrolled") {
+            return isEnrolled;
           }
-          if (courseScopeFilter === "public") {
-            return visibility === "public";
-          }
-          if (courseScopeFilter === "private") {
-            return visibility === "private";
-          }
-          return true;
+          return isCommunityPublic;
         })
         .filter((course) => {
           if (courseYearFilter === "all") {
@@ -9803,20 +9805,17 @@ export default function DashboardPage() {
         <div className="flex w-full flex-col gap-4">
           <DataCard title="Cursos">
             {!openedCourse ? (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-center gap-2">
                 {[
-                  { key: "mine", label: "Mis cursos", count: courseScopeCounts.mine },
-                  { key: "shared", label: "Compartidos", count: courseScopeCounts.shared },
-                  { key: "public", label: "Publicos", count: courseScopeCounts.public },
-                  { key: "private", label: "Privados", count: courseScopeCounts.private },
+                  { key: "created", label: "Cursos creados", count: courseScopeCounts.created },
+                  { key: "enrolled", label: "Cursos inscritos", count: courseScopeCounts.enrolled },
+                  { key: "explore", label: "Explorar", count: courseScopeCounts.explore },
                 ].map((scope) => (
                   <button
                     key={scope.key}
                     type="button"
-                    onClick={() =>
-                      setCourseScopeFilter(scope.key as "all" | "mine" | "shared" | "public" | "private")
-                    }
+                    onClick={() => setCourseScopeFilter(scope.key as "created" | "enrolled" | "explore")}
                     className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
                       courseScopeFilter === scope.key
                         ? "border-[#004aad] bg-[#004aad] text-white"
@@ -9826,87 +9825,100 @@ export default function DashboardPage() {
                     {scope.label} <span className="ml-1 text-xs opacity-90">{scope.count}</span>
                   </button>
                 ))}
+              </div>
+              <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-2">
+                <div className="flex min-w-0 items-center rounded-lg border border-blue-300 bg-white">
+                  <input
+                    value={courseSearchQuery}
+                    onChange={(event) => setCourseSearchQuery(event.target.value)}
+                    placeholder="Buscar (nombre o codigo)"
+                    className="w-full bg-transparent px-3 py-2 text-sm text-slate-900 outline-none"
+                  />
+                  {courseSearchQuery.trim() ? (
+                    <button
+                      type="button"
+                      onClick={() => setCourseSearchQuery("")}
+                      className="px-2 text-slate-500 hover:text-slate-700"
+                    >
+                      x
+                    </button>
+                  ) : null}
+                </div>
                 <button
                   type="button"
-                  onClick={() => setCourseScopeFilter("all")}
-                  className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
-                    courseScopeFilter === "all"
+                  onClick={() => setCourseFiltersOpen((current) => !current)}
+                  className={`inline-flex h-10 w-10 items-center justify-center rounded-lg border transition ${
+                    courseFiltersOpen
                       ? "border-[#004aad] bg-[#004aad] text-white"
-                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      : "border-blue-300 bg-white text-blue-700 hover:bg-blue-50"
                   }`}
+                  title="Filtros"
+                  aria-label="Mostrar filtros"
                 >
-                  Todos <span className="ml-1 text-xs opacity-90">{courseScopeCounts.all}</span>
+                  <svg viewBox="0 0 24 24" fill="none" className="h-5 w-5" aria-hidden="true">
+                    <path
+                      d="M3 5h18M6 12h12M10 19h4"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCourseName("");
+                    setCourseDescription("");
+                    setCourseCode("");
+                    setCourseVisibility("public");
+                    setCourseCoverImageData(null);
+                    setCourseCoverImageName("");
+                    setShowCreateCourseModal(true);
+                  }}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
+                >
+                  Crear curso
                 </button>
               </div>
-              <div className="flex flex-wrap items-stretch gap-2">
-              <select
-                value={courseYearFilter}
-                onChange={(event) => setCourseYearFilter(event.target.value)}
-                className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm text-blue-700 outline-none focus:border-blue-500 sm:w-auto"
-              >
-                <option value="all">Ano</option>
-                {years.map((year) => (
-                  <option key={year} value={String(year)}>
-                    {year}
-                  </option>
-                ))}
-              </select>
-              <select
-                value={courseProgressFilter}
-                onChange={(event) => setCourseProgressFilter(event.target.value)}
-                className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm text-blue-700 outline-none focus:border-blue-500 sm:w-auto"
-              >
-                <option value="all">Progreso</option>
-                <option value="with_exams">Con examenes</option>
-                <option value="without_exams">Sin examenes</option>
-              </select>
-              <div className="flex w-full min-w-0 flex-1 items-center rounded-lg border border-blue-300 bg-white sm:min-w-[240px]">
-                <input
-                  value={courseSearchQuery}
-                  onChange={(event) => setCourseSearchQuery(event.target.value)}
-                  placeholder="Buscar (nombre o codigo)"
-                  className="w-full bg-transparent px-3 py-2 text-sm text-slate-900 outline-none"
-                />
-                {courseSearchQuery.trim() ? (
-                  <button
-                    type="button"
-                    onClick={() => setCourseSearchQuery("")}
-                    className="px-2 text-slate-500 hover:text-slate-700"
+
+              {courseFiltersOpen ? (
+                <div className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 md:grid-cols-3">
+                  <select
+                    value={courseYearFilter}
+                    onChange={(event) => setCourseYearFilter(event.target.value)}
+                    className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm text-blue-700 outline-none focus:border-blue-500"
                   >
-                    x
-                  </button>
-                ) : null}
-              </div>
-
-              <select
-                value={courseSortMode}
-                onChange={(event) =>
-                  setCourseSortMode(event.target.value as "name_asc" | "name_desc" | "newest" | "oldest")
-                }
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-400 sm:w-auto"
-              >
-                <option value="name_asc">Ordenar por nombre del curso</option>
-                <option value="name_desc">Nombre (Z-A)</option>
-                <option value="newest">Mas recientes</option>
-                <option value="oldest">Mas antiguos</option>
-              </select>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setCourseName("");
-                  setCourseDescription("");
-                  setCourseCode("");
-                  setCourseVisibility("public");
-                  setCourseCoverImageData(null);
-                  setCourseCoverImageName("");
-                  setShowCreateCourseModal(true);
-                }}
-                className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 sm:w-auto"
-              >
-                Crear curso
-              </button>
-            </div>
+                    <option value="all">Ano</option>
+                    {years.map((year) => (
+                      <option key={year} value={String(year)}>
+                        {year}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    value={courseProgressFilter}
+                    onChange={(event) => setCourseProgressFilter(event.target.value)}
+                    className="w-full rounded-lg border border-blue-300 bg-white px-3 py-2 text-sm text-blue-700 outline-none focus:border-blue-500"
+                  >
+                    <option value="all">Progreso</option>
+                    <option value="with_exams">Con examenes</option>
+                    <option value="without_exams">Sin examenes</option>
+                  </select>
+                  <select
+                    value={courseSortMode}
+                    onChange={(event) =>
+                      setCourseSortMode(event.target.value as "name_asc" | "name_desc" | "newest" | "oldest")
+                    }
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 outline-none focus:border-blue-400"
+                  >
+                    <option value="name_asc">Ordenar por nombre del curso</option>
+                    <option value="name_desc">Nombre (Z-A)</option>
+                    <option value="newest">Mas recientes</option>
+                    <option value="oldest">Mas antiguos</option>
+                  </select>
+                </div>
+              ) : null}
             </div>
             ) : null}
 
