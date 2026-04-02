@@ -341,10 +341,18 @@ type CourseSessionContentItem = {
   weekId?: number | null;
   weekOrder?: number | null;
   weekName?: string | null;
-  sourceExamId?: number | null;
+  sourceExamId?: number | string | null;
   sourceExamName?: string | null;
   createdAt?: unknown;
 };
+
+function resolveSourceExamId(value: unknown): number | null {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
 
 type CourseWeekItem = {
   id: number;
@@ -409,8 +417,9 @@ function countCourseExams(course: CourseItem): number {
       if (contentType !== "exam" && contentType !== "examen") {
         return;
       }
-      if (typeof content.sourceExamId === "number" && Number.isFinite(content.sourceExamId)) {
-        examIds.add(content.sourceExamId);
+      const sourceExamId = resolveSourceExamId(content.sourceExamId);
+      if (sourceExamId != null) {
+        examIds.add(sourceExamId);
       } else {
         examContentsWithoutId += 1;
       }
@@ -4709,8 +4718,8 @@ export default function DashboardPage() {
     if (!user) {
       return;
     }
-    const examId = Number(content.sourceExamId ?? 0);
-    if (!Number.isFinite(examId) || examId <= 0) {
+    const examId = resolveSourceExamId(content.sourceExamId);
+    if (examId == null) {
       setCourseFeedback("Este contenido no tiene un examen valido para cambiar visibilidad.", "error");
       return;
     }
@@ -6816,8 +6825,9 @@ export default function DashboardPage() {
       ];
       for (const content of allSessionContents) {
         const type = (content.type ?? "").toLowerCase();
-        if ((type === "exam" || type === "examen") && typeof content.sourceExamId === "number" && content.sourceExamId > 0) {
-          examIds.add(content.sourceExamId);
+        const sourceExamId = resolveSourceExamId(content.sourceExamId);
+        if ((type === "exam" || type === "examen") && sourceExamId != null) {
+          examIds.add(sourceExamId);
         }
       }
     }
@@ -10956,9 +10966,9 @@ export default function DashboardPage() {
                                                   }
                                                   return weekContents.map((content) => {
                                                     const contentType = (content.type ?? "").toLowerCase();
-                                                    const sourceExamId = Number(content.sourceExamId ?? 0);
+                                                    const sourceExamId = resolveSourceExamId(content.sourceExamId);
                                                     const sourceExam =
-                                                      Number.isFinite(sourceExamId) && sourceExamId > 0
+                                                      sourceExamId != null
                                                         ? courseExamCatalogById[sourceExamId] ?? null
                                                         : null;
                                                     const typeLabel =
