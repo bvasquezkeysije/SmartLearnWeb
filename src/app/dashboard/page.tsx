@@ -13388,6 +13388,8 @@ export default function DashboardPage() {
                   const showGroupPracticeButton = canStartGroupPractice || canJoinGroupPractice;
                   const groupPracticeButtonLabel = canStartGroupPractice ? "Grupal" : "Unirse";
                   const isGroupButtonLoading = groupPracticeLoading && groupPracticeLoadingExamId === item.id;
+                  const isAnotherGroupButtonLoading =
+                    groupPracticeLoading && groupPracticeLoadingExamId != null && groupPracticeLoadingExamId !== item.id;
                   return (
                   <article key={item.id} className="rounded-lg border border-slate-300 bg-slate-50 p-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -13502,6 +13504,9 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={() => {
+                            if (isAnotherGroupButtonLoading) {
+                              return;
+                            }
                             setPracticeOriginSection("examenes");
                             if (canStartGroupPractice) {
                               if (groupSessionActive) {
@@ -13515,7 +13520,7 @@ export default function DashboardPage() {
                               void onJoinGroupPractice(item);
                             }
                           }}
-                          disabled={groupPracticeLoading}
+                          disabled={isGroupButtonLoading}
                           className="inline-flex items-center gap-2 rounded-lg bg-[#1E40AF] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1E3A8A] disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {isGroupButtonLoading ? (
