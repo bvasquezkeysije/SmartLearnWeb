@@ -1973,9 +1973,7 @@ export default function DashboardPage() {
   const [deletingCourseSessionId, setDeletingCourseSessionId] = useState<number | null>(null);
   const [expandedSessionId, setExpandedSessionId] = useState<number | null>(null);
   const [showAddSessionContentModal, setShowAddSessionContentModal] = useState(false);
-  const [showCreateCourseWeekModal, setShowCreateCourseWeekModal] = useState(false);
   const [addingWeekSessionId, setAddingWeekSessionId] = useState<number | null>(null);
-  const [addingWeekSessionName, setAddingWeekSessionName] = useState("");
   const [editingCourseWeekId, setEditingCourseWeekId] = useState<number | null>(null);
   const [courseWeekName, setCourseWeekName] = useState("");
   const [courseWeekDescription, setCourseWeekDescription] = useState("");
@@ -4075,6 +4073,12 @@ export default function DashboardPage() {
     setEditingCourseSessionId(session.id);
     setEditingCourseSessionName(formatSessionName(session.name));
     setEditingCourseSessionWeeklyContent(session.weeklyContent?.trim() ?? "");
+    setAddingWeekSessionId(session.id);
+    setEditingCourseWeekId(null);
+    setCourseWeekName("");
+    setCourseWeekDescription("");
+    const nextOrder = (session.weeks ?? []).reduce((max, week) => Math.max(max, Number(week.weekOrder ?? 0)), 0) + 1;
+    setCourseWeekOrder(String(Math.max(1, nextOrder)));
     setShowEditCourseSessionModal(true);
     setCourseMessage("");
   };
@@ -4220,9 +4224,7 @@ export default function DashboardPage() {
   };
 
   const resetCourseWeekEditor = () => {
-    setShowCreateCourseWeekModal(false);
     setAddingWeekSessionId(null);
-    setAddingWeekSessionName("");
     setEditingCourseWeekId(null);
     setCourseWeekName("");
     setCourseWeekDescription("");
@@ -4268,23 +4270,27 @@ export default function DashboardPage() {
   const onOpenCreateCourseWeekModal = (session: CourseSessionItem) => {
     const nextOrder = (session.weeks ?? []).reduce((max, week) => Math.max(max, Number(week.weekOrder ?? 0)), 0) + 1;
     setAddingWeekSessionId(session.id);
-    setAddingWeekSessionName(session.name);
+    setEditingCourseSessionId(session.id);
+    setEditingCourseSessionName(formatSessionName(session.name));
+    setEditingCourseSessionWeeklyContent(session.weeklyContent?.trim() ?? "");
     setEditingCourseWeekId(null);
     setCourseWeekName("");
     setCourseWeekDescription("");
     setCourseWeekOrder(String(Math.max(1, nextOrder)));
-    setShowCreateCourseWeekModal(true);
+    setShowEditCourseSessionModal(true);
     setCourseMessage("");
   };
 
   const onOpenEditCourseWeekModal = (session: CourseSessionItem, week: CourseWeekItem) => {
     setAddingWeekSessionId(session.id);
-    setAddingWeekSessionName(session.name);
+    setEditingCourseSessionId(session.id);
+    setEditingCourseSessionName(formatSessionName(session.name));
+    setEditingCourseSessionWeeklyContent(session.weeklyContent?.trim() ?? "");
     setEditingCourseWeekId(week.id);
     setCourseWeekName(week.name?.trim() ?? "");
     setCourseWeekDescription(week.description?.trim() ?? "");
     setCourseWeekOrder(String(Math.max(1, Number(week.weekOrder ?? 1))));
-    setShowCreateCourseWeekModal(true);
+    setShowEditCourseSessionModal(true);
     setCourseMessage("");
   };
 
@@ -6971,11 +6977,11 @@ export default function DashboardPage() {
     const fromCourseContent = options?.contentContext != null;
 
     return (
-      <article className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+      <article className="min-w-0 rounded-lg border border-slate-300 bg-slate-50 p-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
-              <h4 className="text-lg font-semibold text-slate-900">{item.name}</h4>
+              <h4 className="min-w-0 break-all text-lg font-semibold leading-tight text-slate-900">{item.name}</h4>
               {canRenameExam ? (
                 <button
                   type="button"
@@ -6991,8 +6997,8 @@ export default function DashboardPage() {
                 </button>
               ) : null}
             </div>
-            <p className="text-sm text-slate-500">Cargado: {formatExamCreatedAt(item.createdAt, item.created_at)}</p>
-            <p className="text-sm text-slate-500">Codigo: {examCode}</p>
+            <p className="break-words text-sm text-slate-500">Cargado: {formatExamCreatedAt(item.createdAt, item.created_at)}</p>
+            <p className="break-words text-sm text-slate-500">Codigo: {examCode}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className={`rounded-full px-3 py-1 text-xs font-semibold ${visibility === "public" ? "bg-emerald-600 text-white" : "bg-slate-600 text-white"}`}>
@@ -7010,7 +7016,15 @@ export default function DashboardPage() {
 
         <div className="mt-3 flex flex-wrap gap-2">
           {canEditQuestions ? (
-            <button type="button" onClick={() => void onManageExamQuestions(item)} className="rounded-lg bg-[#374151] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1F2937]">
+            <button type="button" onClick={() => void onManageExamQuestions(item)} className="inline-flex items-center gap-2 rounded-lg bg-[#374151] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1F2937]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                <path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5" />
+                <path d="M8 7h8" />
+                <path d="M8 11h8" />
+                <path d="M8 15h5" />
+                <circle cx="18" cy="18" r="3" />
+                <path d="m20.2 20.2 1.3 1.3" />
+              </svg>
               Preguntas
             </button>
           ) : null}
@@ -7021,8 +7035,11 @@ export default function DashboardPage() {
               setPracticeIntent("start");
               void onStartPractice(item, false);
             }}
-            className="rounded-lg bg-[#2563EB] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1D4ED8]"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
           >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+              <path d="M8 5.5v13l10-6.5-10-6.5z" />
+            </svg>
             Individual
           </button>
           {showGroupPracticeButton ? (
@@ -7046,37 +7063,75 @@ export default function DashboardPage() {
                 }
               }}
               disabled={isGroupButtonLoading}
-              className="rounded-lg bg-[#1E40AF] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1E3A8A] disabled:opacity-60"
+              className="inline-flex items-center gap-2 rounded-lg bg-[#1E40AF] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1E3A8A] disabled:opacity-60"
             >
-              {isGroupButtonLoading ? "Entrando..." : groupPracticeButtonLabel}
+              {isGroupButtonLoading ? (
+                "Entrando..."
+              ) : (
+                <>
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
+                    <path d="M8 5.5v13l10-6.5-10-6.5z" />
+                  </svg>
+                  {groupPracticeButtonLabel}
+                </>
+              )}
             </button>
           ) : null}
-          <button type="button" onClick={() => void onOpenExamParticipantsModal(item)} className="rounded-lg bg-[#4B5563] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#374151]">
+          <button type="button" onClick={() => void onOpenExamParticipantsModal(item)} className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#4B5563] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#374151]">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
             Participantes
           </button>
-          <button type="button" onClick={() => void openIndividualPracticeSettingsModal(item)} className="rounded-lg bg-[#38BDF8] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0EA5E9]">
+          <button type="button" onClick={() => void openIndividualPracticeSettingsModal(item)} className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#38BDF8] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#0EA5E9]">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
             Configuracion individual
           </button>
           {canEditSettings ? (
-            <button type="button" onClick={() => openGroupPracticeSettingsModal(item)} className="rounded-lg bg-[#3B82F6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2563EB]">
+            <button type="button" onClick={() => openGroupPracticeSettingsModal(item)} className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#3B82F6] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#2563EB]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
               Configuracion grupal
             </button>
           ) : null}
           {canShareExam ? (
-            <button type="button" onClick={() => onOpenShareModal("exam", item.id, item.name)} className="rounded-lg bg-[#F9C200] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#E0AD00]">
-              Compartir
+            <button type="button" onClick={() => onOpenShareModal("exam", item.id, item.name)} title="Compartir" aria-label="Compartir" className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#F9C200] text-white hover:bg-[#E0AD00]">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                <circle cx="18" cy="5" r="3" />
+                <circle cx="6" cy="12" r="3" />
+                <circle cx="18" cy="19" r="3" />
+                <path d="M8.6 13.5l6.8 4" />
+                <path d="M15.4 6.5l-6.8 4" />
+              </svg>
             </button>
           ) : null}
           {isOwner ? (
             <button
               type="button"
               onClick={() => {
+                ensureExamActionSurface();
                 setSelectedExam(item);
                 setShowDeactivateModal(true);
               }}
-              className="rounded-lg bg-[#EF4444] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#DC2626]"
+              title="Inactivar"
+              aria-label="Inactivar"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#EF4444] text-white hover:bg-[#DC2626]"
             >
-              Inactivar
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5" aria-hidden="true">
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="M19 6l-1 14H6L5 6" />
+                <path d="M10 11v6" />
+                <path d="M14 11v6" />
+              </svg>
             </button>
           ) : null}
           {options?.allowVisibilityToggle ? (
@@ -7242,7 +7297,14 @@ export default function DashboardPage() {
     }
   };
 
+  const ensureExamActionSurface = () => {
+    if (active !== "examenes") {
+      setActive("examenes");
+    }
+  };
+
   const openManageExamModal = (exam: ExamSummary, questions: ExamQuestion[]) => {
+    ensureExamActionSurface();
     setSelectedExam(exam);
     setManagedExamQuestions(questions);
     setEditingQuestionId(null);
@@ -7251,6 +7313,7 @@ export default function DashboardPage() {
   };
 
   const onRenameExamName = (exam: ExamSummary) => {
+    ensureExamActionSurface();
     setRenameExamTarget(exam);
     setRenameExamNameDraft((exam.name ?? "").trim());
     setShowRenameExamModal(true);
@@ -7736,6 +7799,7 @@ export default function DashboardPage() {
   };
 
   const openGroupPracticeSettingsModal = (exam: ExamSummary) => {
+    ensureExamActionSurface();
     setSelectedExam(exam);
     const defaults = resolvePracticeSettingsFromExam(exam);
     setPracticeFeedbackMode(defaults.practiceFeedbackMode);
@@ -7746,6 +7810,7 @@ export default function DashboardPage() {
   };
 
   const openIndividualPracticeSettingsModal = async (exam: ExamSummary) => {
+    ensureExamActionSurface();
     setSelectedExam(exam);
     const settings = await loadIndividualPracticeSettings(exam, true);
     setPracticeFeedbackMode(settings.practiceFeedbackMode);
@@ -7836,6 +7901,7 @@ export default function DashboardPage() {
     if (!user || !exam) {
       return;
     }
+    ensureExamActionSurface();
 
     const individualSettings = await loadIndividualPracticeSettings(exam);
     const effectiveFeedbackMode = individualSettings.practiceFeedbackMode;
@@ -7943,6 +8009,7 @@ export default function DashboardPage() {
     if (!user || !exam) {
       return;
     }
+    ensureExamActionSurface();
 
     suppressGroupRoomClosedModalRef.current = false;
     setSelectedExam(exam);
@@ -8000,6 +8067,7 @@ export default function DashboardPage() {
     if (!user || !exam) {
       return;
     }
+    ensureExamActionSurface();
 
     suppressGroupRoomClosedModalRef.current = false;
     setSelectedExam(exam);
@@ -10620,6 +10688,10 @@ export default function DashboardPage() {
         const secondDate = second.createdAt ? new Date(String(second.createdAt)).getTime() : 0;
         return firstDate - secondDate;
       });
+      const editingCourseSession =
+        editingCourseSessionId == null
+          ? null
+          : orderedOpenedCourseSessions.find((session) => session.id === editingCourseSessionId) ?? null;
       const nextOpenedSessionOrder = getNextSessionOrder(openedCourseSessions);
       const addingContentSession =
         addingContentSessionId == null
@@ -10869,16 +10941,14 @@ export default function DashboardPage() {
                         </article>
                       </div>
 
-                      <article className="rounded-xl border border-slate-200 bg-white p-4">
-                        <p className="text-sm font-semibold text-slate-800">Listado de sesiones</p>
-                        {openedCourseSessions.length === 0 ? (
-                          <p className="mt-2 text-sm text-slate-600">
-                            Aun no hay sesiones. Crea la primera sesion para empezar el contenido semanal.
-                          </p>
-                        ) : (
-                          <div className="mt-3 space-y-2">
-                            {orderedOpenedCourseSessions.map((session) => (
-                              <article key={session.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      {openedCourseSessions.length === 0 ? (
+                        <p className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
+                          Aun no hay sesiones. Crea la primera sesion para empezar el contenido semanal.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {orderedOpenedCourseSessions.map((session) => (
+                            <article key={session.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                                 <div className="flex items-center justify-between gap-2">
                                   <p className="text-sm font-semibold text-[#004aad]">{formatSessionName(session.name)}</p>
                                   <div className="flex items-center gap-1">
@@ -11359,11 +11429,10 @@ export default function DashboardPage() {
                                     ) : null}
                                   </div>
                                 ) : null}
-                              </article>
-                            ))}
-                          </div>
-                        )}
-                      </article>
+                            </article>
+                          ))}
+                        </div>
+                      )}
 
                     </div>
                   ) : null}
@@ -11986,45 +12055,145 @@ export default function DashboardPage() {
                 setEditingCourseSessionId(null);
                 setEditingCourseSessionName("");
                 setEditingCourseSessionWeeklyContent("");
+                resetCourseWeekEditor();
               }}
             >
-              <form onSubmit={onUpdateCourseSession} className="space-y-3">
-                <input
-                  value={editingCourseSessionName}
-                  onChange={(event) => setEditingCourseSessionName(event.target.value)}
-                  placeholder="SESION 1: Nombre de la sesion"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
-                  required
-                />
-                <textarea
-                  value={editingCourseSessionWeeklyContent}
-                  onChange={(event) => setEditingCourseSessionWeeklyContent(event.target.value)}
-                  placeholder="Descripcion de la sesion"
-                  rows={4}
-                  className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowEditCourseSessionModal(false);
-                      setEditingCourseSessionId(null);
-                      setEditingCourseSessionName("");
-                      setEditingCourseSessionWeeklyContent("");
-                    }}
-                    className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={updatingCourseSession}
-                    className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
-                  >
-                    {updatingCourseSession ? "Guardando..." : "Guardar cambios"}
-                  </button>
+              <div className="space-y-4">
+                <form onSubmit={onUpdateCourseSession} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Datos de la sesion</p>
+                  <input
+                    value={editingCourseSessionName}
+                    onChange={(event) => setEditingCourseSessionName(event.target.value)}
+                    placeholder="SESION 1: Nombre de la sesion"
+                    className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                    required
+                  />
+                  <textarea
+                    value={editingCourseSessionWeeklyContent}
+                    onChange={(event) => setEditingCourseSessionWeeklyContent(event.target.value)}
+                    placeholder="Descripcion de la sesion"
+                    rows={4}
+                    className="w-full resize-none rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowEditCourseSessionModal(false);
+                        setEditingCourseSessionId(null);
+                        setEditingCourseSessionName("");
+                        setEditingCourseSessionWeeklyContent("");
+                        resetCourseWeekEditor();
+                      }}
+                      className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={updatingCourseSession}
+                      className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
+                    >
+                      {updatingCourseSession ? "Guardando..." : "Guardar sesion"}
+                    </button>
+                  </div>
+                </form>
+
+                <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Semanas de la sesion</p>
+                  {editingCourseSession?.weeks && editingCourseSession.weeks.length > 0 ? (
+                    <div className="space-y-2">
+                      {[...editingCourseSession.weeks]
+                        .sort((a, b) => Number(a.weekOrder ?? 0) - Number(b.weekOrder ?? 0))
+                        .map((week) => (
+                          <div
+                            key={`edit-session-week-${editingCourseSession.id}-${week.id}`}
+                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-white px-2 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-semibold text-indigo-800">
+                                {(week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim()}
+                              </p>
+                              {week.description?.trim() ? (
+                                <p className="truncate text-[11px] text-indigo-600">{week.description.trim()}</p>
+                              ) : null}
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => onOpenEditCourseWeekModal(editingCourseSession, week)}
+                                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                              >
+                                Editar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void onDeleteCourseWeek(editingCourseSession, week)}
+                                disabled={deletingCourseWeekId === week.id}
+                                className="rounded-md border border-rose-300 bg-white px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                              >
+                                {deletingCourseWeekId === week.id ? "..." : "Eliminar"}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-indigo-700">Aun no hay semanas creadas para esta sesion.</p>
+                  )}
+
+                  <form onSubmit={onCreateCourseWeek} className="space-y-2 rounded-lg border border-indigo-200 bg-white p-2">
+                    <p className="text-[11px] font-semibold text-indigo-700">
+                      {editingCourseWeekId == null ? "Nueva semana" : "Editar semana seleccionada"}
+                    </p>
+                    <input
+                      value={courseWeekName}
+                      onChange={(event) => setCourseWeekName(event.target.value)}
+                      placeholder="Nombre de la semana (ej. SEMANA 2: Practica)"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                    />
+                    <input
+                      value={courseWeekOrder}
+                      onChange={(event) => setCourseWeekOrder(event.target.value)}
+                      placeholder="Orden de semana"
+                      inputMode="numeric"
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                    />
+                    <textarea
+                      value={courseWeekDescription}
+                      onChange={(event) => setCourseWeekDescription(event.target.value)}
+                      placeholder="Descripcion de la semana"
+                      className="min-h-20 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (editingCourseSession) {
+                            onOpenCreateCourseWeekModal(editingCourseSession);
+                          }
+                        }}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        Limpiar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={creatingCourseWeek}
+                        className="rounded-lg bg-[#004aad] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
+                      >
+                        {creatingCourseWeek
+                          ? editingCourseWeekId == null
+                            ? "Creando..."
+                            : "Guardando..."
+                          : editingCourseWeekId == null
+                            ? "Crear semana"
+                            : "Guardar semana"}
+                      </button>
+                    </div>
+                  </form>
                 </div>
-              </form>
+              </div>
             </ModalShell>
           ) : null}
 
@@ -12385,57 +12554,6 @@ export default function DashboardPage() {
                     className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
                   >
                     {savingCourseId === editingCourseId ? "Guardando..." : "Guardar cambios"}
-                  </button>
-                </div>
-              </form>
-            </ModalShell>
-          ) : null}
-
-          {showCreateCourseWeekModal && addingWeekSessionId != null ? (
-            <ModalShell
-              title={`${editingCourseWeekId == null ? "Crear semana" : "Editar semana"}: ${addingWeekSessionName || "Sesion"}`}
-              onClose={resetCourseWeekEditor}
-            >
-              <form onSubmit={onCreateCourseWeek} className="space-y-3">
-                <input
-                  value={courseWeekName}
-                  onChange={(event) => setCourseWeekName(event.target.value)}
-                  placeholder="Nombre de la semana (ej. SEMANA 2: Practica)"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
-                />
-                <input
-                  value={courseWeekOrder}
-                  onChange={(event) => setCourseWeekOrder(event.target.value)}
-                  placeholder="Orden de semana"
-                  inputMode="numeric"
-                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
-                />
-                <textarea
-                  value={courseWeekDescription}
-                  onChange={(event) => setCourseWeekDescription(event.target.value)}
-                  placeholder="Descripcion de la semana"
-                  className="min-h-24 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
-                />
-                <div className="flex justify-end gap-2">
-                  <button
-                    type="button"
-                    onClick={resetCourseWeekEditor}
-                    className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={creatingCourseWeek}
-                    className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
-                  >
-                    {creatingCourseWeek
-                      ? editingCourseWeekId == null
-                        ? "Creando..."
-                        : "Guardando..."
-                      : editingCourseWeekId == null
-                        ? "Crear semana"
-                        : "Guardar cambios"}
                   </button>
                 </div>
               </form>
@@ -19395,16 +19513,16 @@ function ModalShell({
   panelClassName?: string;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-slate-900/55 p-2 sm:items-center sm:p-4" onClick={onClose}>
       <div
         className={
           panelClassName ??
-          "w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
+          "w-full max-w-2xl max-h-[92dvh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-2xl sm:max-h-[90vh] sm:p-4"
         }
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="mb-3 flex items-center justify-between gap-2">
-          <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+        <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+          <h3 className="min-w-0 break-words text-base font-semibold text-slate-900 sm:text-lg">{title}</h3>
           <button
             type="button"
             onClick={onClose}
