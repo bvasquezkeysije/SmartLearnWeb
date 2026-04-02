@@ -337,6 +337,7 @@ type CourseSessionContentItem = {
   externalLink?: string | null;
   fileName?: string | null;
   fileData?: string | null;
+  contentOrder?: number | null;
   weekId?: number | null;
   weekOrder?: number | null;
   weekName?: string | null;
@@ -1986,6 +1987,7 @@ export default function DashboardPage() {
   const [sessionExamSourceId, setSessionExamSourceId] = useState("");
   const [sessionContentWeekId, setSessionContentWeekId] = useState("");
   const [deletingSessionContentId, setDeletingSessionContentId] = useState<number | null>(null);
+  const [reorderingSessionContentId, setReorderingSessionContentId] = useState<number | null>(null);
   const [creatingCourseSession, setCreatingCourseSession] = useState(false);
   const [updatingCourseSession, setUpdatingCourseSession] = useState(false);
   const [savingSessionContent, setSavingSessionContent] = useState(false);
@@ -2019,6 +2021,7 @@ export default function DashboardPage() {
   );
   const [anchoredExamVisibilityById, setAnchoredExamVisibilityById] = useState<Record<number, boolean>>({});
   const [anchoredExamVisibilityLoadingById, setAnchoredExamVisibilityLoadingById] = useState<Record<number, boolean>>({});
+  const [courseExamCatalogById, setCourseExamCatalogById] = useState<Record<number, ExamSummary>>({});
   const [courseYearFilter, setCourseYearFilter] = useState("all");
   const [courseProgressFilter, setCourseProgressFilter] = useState("all");
   const [courseScopeFilter, setCourseScopeFilter] = useState<"created" | "enrolled" | "explore">("created");
@@ -4437,9 +4440,11 @@ export default function DashboardPage() {
         return;
       }
       const selectedWeekId = Number(sessionContentWeekId);
-      if (Number.isFinite(selectedWeekId) && selectedWeekId > 0) {
-        body.weekId = selectedWeekId;
+      if (!Number.isFinite(selectedWeekId) || selectedWeekId <= 0) {
+        setCourseFeedback("Selecciona una semana para guardar el contenido.", "error");
+        return;
       }
+      body.weekId = selectedWeekId;
 
       if (sessionContentType === "video") {
         const link = sessionVideoLink.trim();
@@ -4583,6 +4588,64 @@ export default function DashboardPage() {
       }
     } finally {
       setDeletingSessionContentId(null);
+    }
+  };
+
+  const onMoveSessionContentInWeek = async (
+    session: CourseSessionItem,
+    week: CourseWeekItem,
+    content: CourseSessionContentItem,
+    direction: "up" | "down",
+  ) => {
+    if (!user) {
+      return;
+    }
+    const resolvedCourseId = resolveCourseIdBySession(session.id);
+    if (resolvedCourseId == null) {
+      setCourseFeedback("No se encontro el curso para reordenar contenidos.", "error");
+      return;
+    }
+
+    const orderedWeekContents = [...(week.contents ?? [])].sort((a, b) => {
+      const aOrder = Number(a.contentOrder ?? 0);
+      const bOrder = Number(b.contentOrder ?? 0);
+      if (aOrder !== bOrder) {
+        return aOrder - bOrder;
+      }
+      return a.id - b.id;
+    });
+    const currentIndex = orderedWeekContents.findIndex((item) => item.id === content.id);
+    if (currentIndex < 0) {
+      return;
+    }
+    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+    if (targetIndex < 0 || targetIndex >= orderedWeekContents.length) {
+      return;
+    }
+
+    const reordered = [...orderedWeekContents];
+    const temp = reordered[currentIndex];
+    reordered[currentIndex] = reordered[targetIndex];
+    reordered[targetIndex] = temp;
+    const orderedContentIds = reordered.map((item) => item.id);
+
+    setReorderingSessionContentId(content.id);
+    try {
+      await patchJson(
+        `/api/v1/courses/${resolvedCourseId}/sessions/${session.id}/weeks/${week.id}/contents/order`,
+        user.token,
+        { userId: user.id, orderedContentIds },
+      );
+      await refreshCourses();
+      setCourseFeedback("Orden de contenidos actualizado.", "success");
+    } catch (reorderError) {
+      if (reorderError instanceof Error) {
+        setCourseFeedback(reorderError.message, "error");
+      } else {
+        setCourseFeedback("No se pudo actualizar el orden de contenidos.", "error");
+      }
+    } finally {
+      setReorderingSessionContentId(null);
     }
   };
 
@@ -6747,7 +6810,11 @@ export default function DashboardPage() {
 
     const examIds = new Set<number>();
     for (const session of openedCourse.sessions ?? []) {
-      for (const content of session.contents ?? []) {
+      const allSessionContents = [
+        ...(session.contents ?? []),
+        ...((session.weeks ?? []).flatMap((week) => week.contents ?? [])),
+      ];
+      for (const content of allSessionContents) {
         const type = (content.type ?? "").toLowerCase();
         if ((type === "exam" || type === "examen") && typeof content.sourceExamId === "number" && content.sourceExamId > 0) {
           examIds.add(content.sourceExamId);
@@ -6758,35 +6825,51 @@ export default function DashboardPage() {
       return;
     }
 
-    const missingIds = Array.from(examIds).filter((examId) => !(examId in anchoredExamVisibilityById));
-    if (missingIds.length === 0) {
+    const missingVisibilityIds = Array.from(examIds).filter((examId) => !(examId in anchoredExamVisibilityById));
+    const missingCatalogIds = Array.from(examIds).filter((examId) => !(examId in courseExamCatalogById));
+    if (missingVisibilityIds.length === 0 && missingCatalogIds.length === 0) {
       return;
     }
 
     let cancelled = false;
     void (async () => {
       try {
-        const responses = await Promise.all(
-          missingIds.map(
-            (examId) =>
-              fetchJson(
-                `/api/v1/ia/exams/${examId}/list-visibility?userId=${user.id}`,
-                user.token,
-              ) as Promise<ExamListVisibilityResponse>,
-          ),
-        );
-        if (cancelled) {
-          return;
-        }
-        setAnchoredExamVisibilityById((previous) => {
-          const next = { ...previous };
-          for (const response of responses) {
-            if (typeof response.examId === "number") {
-              next[response.examId] = Boolean(response.visible);
-            }
+        if (missingVisibilityIds.length > 0) {
+          const responses = await Promise.all(
+            missingVisibilityIds.map(
+              (examId) =>
+                fetchJson(
+                  `/api/v1/ia/exams/${examId}/list-visibility?userId=${user.id}`,
+                  user.token,
+                ) as Promise<ExamListVisibilityResponse>,
+            ),
+          );
+          if (!cancelled) {
+            setAnchoredExamVisibilityById((previous) => {
+              const next = { ...previous };
+              for (const response of responses) {
+                if (typeof response.examId === "number") {
+                  next[response.examId] = Boolean(response.visible);
+                }
+              }
+              return next;
+            });
           }
-          return next;
-        });
+        }
+        if (missingCatalogIds.length > 0) {
+          const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+          if (!cancelled) {
+            setCourseExamCatalogById((previous) => {
+              const next = { ...previous };
+              for (const exam of exams) {
+                if (exam && typeof exam.id === "number") {
+                  next[exam.id] = exam;
+                }
+              }
+              return next;
+            });
+          }
+        }
       } catch {
         // silencio: se resolvera al pulsar el boton o en el siguiente intento
       }
@@ -6795,7 +6878,177 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, active, openedCourseId, payload, anchoredExamVisibilityById]);
+  }, [user, active, openedCourseId, payload, anchoredExamVisibilityById, courseExamCatalogById]);
+
+  const renderExamCardActions = (
+    item: ExamSummary,
+    options?: {
+      contentContext?: { sessionId: number; content: CourseSessionContentItem };
+      allowVisibilityToggle?: boolean;
+    },
+  ): ReactNode => {
+    const accessRole = (item.accessRole ?? "viewer").toLowerCase();
+    const canEditQuestions = item.canEditQuestions ?? accessRole !== "viewer";
+    const canEditSettings = item.canEditSettings ?? (accessRole === "owner" || accessRole === "editor");
+    const canShareExam = item.canShare ?? accessRole === "owner";
+    const canStartGroupExam = item.canStartGroup ?? accessRole === "owner";
+    const canRenameExam = item.canRenameExam ?? accessRole === "owner";
+    const isOwner = accessRole === "owner";
+    const visibility = (item.visibility ?? "private").toLowerCase() === "public" ? "public" : "private";
+    const participantsCount = Math.max(1, Number(item.participantsCount ?? 1));
+    const examCode = (item.code ?? "").trim() || `EXM-${String(item.id).padStart(6, "0")}`;
+    const personalPracticeCount = Number(item.personalPracticeCount ?? item.attemptsCount ?? 0);
+    const groupPracticeCount = Number(item.groupPracticeCount ?? 0);
+    const groupPracticeStatus = (item.groupPracticeStatus ?? "").toLowerCase();
+    const groupSessionActive = groupPracticeStatus === "waiting" || groupPracticeStatus === "active";
+    const hasOpenGroupSession = groupSessionActive && item.groupPracticeSessionId != null;
+    const canStartGroupPractice = isOwner || canStartGroupExam;
+    const canJoinGroupPractice = hasOpenGroupSession;
+    const showGroupPracticeButton = canStartGroupPractice || canJoinGroupPractice;
+    const groupPracticeButtonLabel = canStartGroupPractice ? "Grupal" : "Unirse";
+    const isGroupButtonLoading = groupPracticeLoading && groupPracticeLoadingExamId === item.id;
+    const isAnotherGroupButtonLoading =
+      groupPracticeLoading && groupPracticeLoadingExamId != null && groupPracticeLoadingExamId !== item.id;
+    const fromCourseContent = options?.contentContext != null;
+
+    return (
+      <article className="rounded-lg border border-slate-300 bg-slate-50 p-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <h4 className="text-lg font-semibold text-slate-900">{item.name}</h4>
+              {canRenameExam ? (
+                <button
+                  type="button"
+                  onClick={() => void onRenameExamName(item)}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                  aria-label="Editar nombre del examen"
+                  title="Editar nombre del examen"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
+                    <path d="M12 20h9" />
+                    <path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z" />
+                  </svg>
+                </button>
+              ) : null}
+            </div>
+            <p className="text-sm text-slate-500">Cargado: {formatExamCreatedAt(item.createdAt, item.created_at)}</p>
+            <p className="text-sm text-slate-500">Codigo: {examCode}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className={`rounded-full px-3 py-1 text-xs font-semibold ${visibility === "public" ? "bg-emerald-600 text-white" : "bg-slate-600 text-white"}`}>
+              {visibility === "public" ? "Publico" : "Privado"}
+            </span>
+            <span className="rounded-full bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">
+              {accessRole === "owner" ? "Propietario" : accessRole === "editor" ? "Editor" : "Lector"}
+            </span>
+            <span className="rounded-full bg-sky-600 px-3 py-1 text-xs font-semibold text-white">{participantsCount} participantes</span>
+            <span className="rounded-full bg-blue-600 px-3 py-1 text-xs font-semibold text-white">{item.questionsCount ?? 0} preguntas</span>
+            <span className="rounded-full bg-slate-500 px-3 py-1 text-xs font-semibold text-white">{personalPracticeCount} repasos personales</span>
+            <span className="rounded-full bg-fuchsia-600 px-3 py-1 text-xs font-semibold text-white">{groupPracticeCount} repasos grupales</span>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {canEditQuestions ? (
+            <button type="button" onClick={() => void onManageExamQuestions(item)} className="rounded-lg bg-[#374151] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1F2937]">
+              Preguntas
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              setPracticeOriginSection(fromCourseContent ? "cursos" : "examenes");
+              setPracticeIntent("start");
+              void onStartPractice(item, false);
+            }}
+            className="rounded-lg bg-[#2563EB] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1D4ED8]"
+          >
+            Individual
+          </button>
+          {showGroupPracticeButton ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (isAnotherGroupButtonLoading) {
+                  return;
+                }
+                setPracticeOriginSection(fromCourseContent ? "cursos" : "examenes");
+                if (canStartGroupPractice) {
+                  if (groupSessionActive) {
+                    void onJoinGroupPractice(item);
+                  } else {
+                    void onCreateGroupPractice(item);
+                  }
+                  return;
+                }
+                if (canJoinGroupPractice) {
+                  void onJoinGroupPractice(item);
+                }
+              }}
+              disabled={isGroupButtonLoading}
+              className="rounded-lg bg-[#1E40AF] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1E3A8A] disabled:opacity-60"
+            >
+              {isGroupButtonLoading ? "Entrando..." : groupPracticeButtonLabel}
+            </button>
+          ) : null}
+          <button type="button" onClick={() => void onOpenExamParticipantsModal(item)} className="rounded-lg bg-[#4B5563] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#374151]">
+            Participantes
+          </button>
+          <button type="button" onClick={() => void openIndividualPracticeSettingsModal(item)} className="rounded-lg bg-[#38BDF8] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0EA5E9]">
+            Configuracion individual
+          </button>
+          {canEditSettings ? (
+            <button type="button" onClick={() => openGroupPracticeSettingsModal(item)} className="rounded-lg bg-[#3B82F6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2563EB]">
+              Configuracion grupal
+            </button>
+          ) : null}
+          {canShareExam ? (
+            <button type="button" onClick={() => onOpenShareModal("exam", item.id, item.name)} className="rounded-lg bg-[#F9C200] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#E0AD00]">
+              Compartir
+            </button>
+          ) : null}
+          {isOwner ? (
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedExam(item);
+                setShowDeactivateModal(true);
+              }}
+              className="rounded-lg bg-[#EF4444] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#DC2626]"
+            >
+              Inactivar
+            </button>
+          ) : null}
+          {options?.allowVisibilityToggle ? (
+            <button
+              type="button"
+              onClick={() => void onToggleAnchoredExamVisibility(options.contentContext!.content)}
+              disabled={Boolean(anchoredExamVisibilityLoadingById[item.id])}
+              className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+            >
+              {Boolean(anchoredExamVisibilityLoadingById[item.id])
+                ? "Actualizando..."
+                : Boolean(anchoredExamVisibilityById[item.id])
+                  ? "Ocultar de Examenes"
+                  : "Visualizar en Examenes"}
+            </button>
+          ) : null}
+          {fromCourseContent ? (
+            <button
+              type="button"
+              onClick={() =>
+                void onStartPracticeFromCourseSessionContent(options!.contentContext!.sessionId, options!.contentContext!.content)
+              }
+              className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
+            >
+              Iniciar repaso
+            </button>
+          ) : null}
+        </div>
+      </article>
+    );
+  };
 
   useEffect(() => {
     if (!user || !showGroupPracticeRunnerModal || !selectedExam || !groupPracticeState) {
@@ -10670,7 +10923,7 @@ export default function DashboardPage() {
                                                     onClick={() => onOpenAddSessionContentModal(session, week.id)}
                                                     className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
                                                   >
-                                                    Añadir contenido
+                                                    Anadir contenido
                                                   </button>
                                                   <button
                                                     type="button"
@@ -10689,18 +10942,142 @@ export default function DashboardPage() {
                                                   </button>
                                                 </div>
                                               ) : null}
+
+                                              <div className="mt-2 w-full space-y-2">
+                                                {(() => {
+                                                  const weekContentsSource =
+                                                    week.contents && week.contents.length > 0
+                                                      ? week.contents
+                                                      : (session.contents ?? []).filter((content) => content.weekId === week.id);
+                                                  const weekContents = [...weekContentsSource].sort((a, b) => {
+                                                    const aOrder = Number(a.contentOrder ?? 0);
+                                                    const bOrder = Number(b.contentOrder ?? 0);
+                                                    if (aOrder !== bOrder) {
+                                                      return aOrder - bOrder;
+                                                    }
+                                                    return a.id - b.id;
+                                                  });
+                                                  if (weekContents.length === 0) {
+                                                    return <p className="text-[11px] text-slate-500">Sin contenidos en esta semana.</p>;
+                                                  }
+                                                  return weekContents.map((content) => {
+                                                    const contentType = (content.type ?? "").toLowerCase();
+                                                    const sourceExamId = Number(content.sourceExamId ?? 0);
+                                                    const sourceExam =
+                                                      Number.isFinite(sourceExamId) && sourceExamId > 0
+                                                        ? courseExamCatalogById[sourceExamId] ?? null
+                                                        : null;
+                                                    const typeLabel =
+                                                      contentType === "video"
+                                                        ? "Video"
+                                                        : contentType === "pdf"
+                                                          ? "PDF"
+                                                          : contentType === "word"
+                                                            ? "Word"
+                                                            : contentType === "exam"
+                                                              ? "Examen"
+                                                              : contentType === "cover"
+                                                                ? "Portada"
+                                                                : "Contenido";
+                                                    return (
+                                                      <div
+                                                        key={`week-content-${week.id}-${content.id}`}
+                                                        className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
+                                                      >
+                                                        <div className="flex items-start justify-between gap-2">
+                                                          <p className="font-semibold text-slate-800">
+                                                            {content.title?.trim() || "Sin nombre"} - {typeLabel}
+                                                          </p>
+                                                            {openedCourseIsOwner ? (
+                                                              <div className="flex items-center gap-1">
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => void onMoveSessionContentInWeek(session, week, content, "up")}
+                                                                  title="Subir contenido"
+                                                                  aria-label="Subir contenido"
+                                                                  disabled={deletingSessionContentId === content.id || reorderingSessionContentId === content.id}
+                                                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                                                                >
+                                                                  ↑
+                                                                </button>
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => void onMoveSessionContentInWeek(session, week, content, "down")}
+                                                                  title="Bajar contenido"
+                                                                  aria-label="Bajar contenido"
+                                                                  disabled={deletingSessionContentId === content.id || reorderingSessionContentId === content.id}
+                                                                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                                                                >
+                                                                  ↓
+                                                                </button>
+                                                                <button
+                                                                  type="button"
+                                                                  onClick={() => onOpenEditSessionContentModal(session, content)}
+                                                                title="Editar contenido"
+                                                                aria-label="Editar contenido"
+                                                                disabled={deletingSessionContentId === content.id || reorderingSessionContentId === content.id}
+                                                                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+                                                              >
+                                                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                                                                  <path strokeLinecap="round" strokeLinejoin="round" d="m3 21 3.8-1 11.4-11.4a2.1 2.1 0 0 0-3-3L3.8 17 3 21z" />
+                                                                  <path strokeLinecap="round" strokeLinejoin="round" d="m14.5 6.5 3 3" />
+                                                                </svg>
+                                                              </button>
+                                                              <button
+                                                                type="button"
+                                                                onClick={() => void onDeleteSessionContent(session, content)}
+                                                                title="Eliminar contenido"
+                                                                aria-label="Eliminar contenido"
+                                                                disabled={deletingSessionContentId === content.id || reorderingSessionContentId === content.id}
+                                                                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                                                              >
+                                                                {deletingSessionContentId === content.id ? "..." : (
+                                                                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M8 6V4h8v2" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 6l-1 14H6L5 6" />
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
+                                                                  </svg>
+                                                                )}
+                                                              </button>
+                                                            </div>
+                                                          ) : null}
+                                                        </div>
+                                                        {contentType === "exam" ? (
+                                                          <div className="mt-2">
+                                                            {sourceExam ? (
+                                                              renderExamCardActions(sourceExam, {
+                                                                contentContext: { sessionId: session.id, content },
+                                                                allowVisibilityToggle: !openedCourseIsOwner,
+                                                              })
+                                                            ) : (
+                                                              <button
+                                                                type="button"
+                                                                onClick={() => void onStartPracticeFromCourseSessionContent(session.id, content)}
+                                                                className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                                                              >
+                                                                Iniciar repaso
+                                                              </button>
+                                                            )}
+                                                          </div>
+                                                        ) : null}
+                                                      </div>
+                                                    );
+                                                  });
+                                                })()}
+                                              </div>
                                             </div>
                                           ))}
                                         </div>
                                       </div>
                                     ) : null}
 
-                                    <div className="space-y-2">
+                                    {false ? (<div className="space-y-2">
                                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Contenidos guardados</p>
                                       {(() => {
                                         const sessionContents =
-                                          session.contents && session.contents.length > 0
-                                            ? session.contents
+                                          (session.contents ?? []).length > 0
+                                            ? (session.contents ?? [])
                                             : (session.weeks ?? []).flatMap((week) => week.contents ?? []);
                                         return sessionContents.length > 0 ? (
                                         <div className="space-y-2">
@@ -10861,7 +11238,7 @@ export default function DashboardPage() {
                                         <p className="text-xs text-slate-500">No hay contenidos guardados aun.</p>
                                       );
                                     })()}
-                                    </div>
+                                    </div>) : null}
 
                                     {openedCourseIsOwner ? (
                                       <div className="flex justify-end gap-2">
@@ -10871,13 +11248,6 @@ export default function DashboardPage() {
                                           className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
                                         >
                                           Anadir semana
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => onOpenAddSessionContentModal(session)}
-                                          className="rounded-lg bg-[#004aad] px-3 py-2 text-xs font-semibold text-white hover:bg-[#003b88]"
-                                        >
-                                          Anadir contenido
                                         </button>
                                       </div>
                                     ) : null}
