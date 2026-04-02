@@ -6844,7 +6844,9 @@ export default function DashboardPage() {
       return [];
     }
     const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
-    setPayload(exams);
+    if (active === "examenes") {
+      setPayload(exams);
+    }
     return exams;
   };
 
