@@ -11012,56 +11012,52 @@ export default function DashboardPage() {
                                   </div>
                                 </div>
                                 {expandedSessionId === session.id ? (
-                                  <div className="mt-3 space-y-3 rounded-lg border border-slate-200 bg-white p-3">
-                                    <p className="text-xs text-slate-600">
-                                      {session.weeklyContent?.trim() || "Sin descripcion registrada en esta sesion."}
-                                    </p>
-
+                                  <div className="mt-3 space-y-3">
                                     {session.weeks && session.weeks.length > 0 ? (
-                                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
-                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Semanas</p>
-                                        <div className="mt-2 space-y-2">
+                                      <div className="space-y-2">
                                           {session.weeks.map((week) => (
                                             <div
                                               key={`session-week-${session.id}-${week.id}`}
-                                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5"
+                                              className="space-y-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-2"
                                             >
-                                              <div className="min-w-0">
-                                                <p className="truncate text-[11px] font-semibold text-indigo-700">
-                                                  {(week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim()}
-                                                </p>
-                                                {week.description?.trim() ? (
-                                                  <p className="truncate text-[10px] text-indigo-600">{week.description.trim()}</p>
+                                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <div className="min-w-0">
+                                                  <p className="truncate text-[11px] font-semibold text-indigo-700">
+                                                    {(week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim()}
+                                                  </p>
+                                                  {week.description?.trim() ? (
+                                                    <p className="truncate text-[10px] text-indigo-600">{week.description.trim()}</p>
+                                                  ) : null}
+                                                </div>
+                                                {openedCourseIsOwner ? (
+                                                  <div className="flex items-center gap-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => onOpenAddSessionContentModal(session, week.id)}
+                                                      className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
+                                                    >
+                                                      Anadir contenido
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => onOpenEditCourseWeekModal(session, week)}
+                                                      className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                                                    >
+                                                      Editar
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => void onDeleteCourseWeek(session, week)}
+                                                      disabled={deletingCourseWeekId === week.id}
+                                                      className="rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                                                    >
+                                                      {deletingCourseWeekId === week.id ? "..." : "Eliminar"}
+                                                    </button>
+                                                  </div>
                                                 ) : null}
                                               </div>
-                                              {openedCourseIsOwner ? (
-                                                <div className="flex items-center gap-1">
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => onOpenAddSessionContentModal(session, week.id)}
-                                                    className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
-                                                  >
-                                                    Anadir contenido
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => onOpenEditCourseWeekModal(session, week)}
-                                                    className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
-                                                  >
-                                                    Editar
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => void onDeleteCourseWeek(session, week)}
-                                                    disabled={deletingCourseWeekId === week.id}
-                                                    className="rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
-                                                  >
-                                                    {deletingCourseWeekId === week.id ? "..." : "Eliminar"}
-                                                  </button>
-                                                </div>
-                                              ) : null}
 
-                                              <div className="mt-2 w-full space-y-2">
+                                              <div className="space-y-2">
                                                 {(() => {
                                                   const weekContentsSource =
                                                     week.contents && week.contents.length > 0
@@ -11244,7 +11240,6 @@ export default function DashboardPage() {
                                               </div>
                                             </div>
                                           ))}
-                                        </div>
                                       </div>
                                     ) : null}
 
