@@ -12564,6 +12564,18 @@ export default function DashboardPage() {
                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                       allowFullScreen
                     />
+                  ) : courseContentPreviewType === "pdf" ? (
+                    <object
+                      data={courseContentPreviewUrl}
+                      type="application/pdf"
+                      className="h-full w-full bg-white"
+                    >
+                      <embed
+                        src={courseContentPreviewUrl}
+                        type="application/pdf"
+                        className="h-full w-full bg-white"
+                      />
+                    </object>
                   ) : (
                     <iframe
                       src={courseContentPreviewUrl}
