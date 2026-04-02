@@ -6807,7 +6807,7 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    if (!user || active !== "cursos" || openedCourseId == null || !Array.isArray(payload)) {
+    if (!user || active !== "cursos" || openedCourseId == null) {
       return;
     }
 
