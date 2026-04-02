@@ -1966,6 +1966,7 @@ export default function DashboardPage() {
   const [showCreateCourseWeekModal, setShowCreateCourseWeekModal] = useState(false);
   const [addingWeekSessionId, setAddingWeekSessionId] = useState<number | null>(null);
   const [addingWeekSessionName, setAddingWeekSessionName] = useState("");
+  const [editingCourseWeekId, setEditingCourseWeekId] = useState<number | null>(null);
   const [courseWeekName, setCourseWeekName] = useState("");
   const [courseWeekDescription, setCourseWeekDescription] = useState("");
   const [courseWeekOrder, setCourseWeekOrder] = useState("");
@@ -1989,6 +1990,7 @@ export default function DashboardPage() {
   const [updatingCourseSession, setUpdatingCourseSession] = useState(false);
   const [savingSessionContent, setSavingSessionContent] = useState(false);
   const [creatingCourseWeek, setCreatingCourseWeek] = useState(false);
+  const [deletingCourseWeekId, setDeletingCourseWeekId] = useState<number | null>(null);
   const [creatingCourse, setCreatingCourse] = useState(false);
   const [showCreateCourseModal, setShowCreateCourseModal] = useState(false);
   const [showEditCourseModal, setShowEditCourseModal] = useState(false);
@@ -4209,6 +4211,7 @@ export default function DashboardPage() {
     setShowCreateCourseWeekModal(false);
     setAddingWeekSessionId(null);
     setAddingWeekSessionName("");
+    setEditingCourseWeekId(null);
     setCourseWeekName("");
     setCourseWeekDescription("");
     setCourseWeekOrder("");
@@ -4231,8 +4234,8 @@ export default function DashboardPage() {
     setCourseMessage("");
   };
 
-  const onOpenAddSessionContentModal = (session: CourseSessionItem) => {
-    const defaultWeekId = (session.weeks ?? [])[0]?.id;
+  const onOpenAddSessionContentModal = (session: CourseSessionItem, preferredWeekId?: number | null) => {
+    const defaultWeekId = preferredWeekId ?? (session.weeks ?? [])[0]?.id;
     setAddingContentSessionId(session.id);
     setAddingContentSessionName(session.name);
     setEditingSessionContentId(null);
@@ -4254,9 +4257,21 @@ export default function DashboardPage() {
     const nextOrder = (session.weeks ?? []).reduce((max, week) => Math.max(max, Number(week.weekOrder ?? 0)), 0) + 1;
     setAddingWeekSessionId(session.id);
     setAddingWeekSessionName(session.name);
+    setEditingCourseWeekId(null);
     setCourseWeekName("");
     setCourseWeekDescription("");
     setCourseWeekOrder(String(Math.max(1, nextOrder)));
+    setShowCreateCourseWeekModal(true);
+    setCourseMessage("");
+  };
+
+  const onOpenEditCourseWeekModal = (session: CourseSessionItem, week: CourseWeekItem) => {
+    setAddingWeekSessionId(session.id);
+    setAddingWeekSessionName(session.name);
+    setEditingCourseWeekId(week.id);
+    setCourseWeekName(week.name?.trim() ?? "");
+    setCourseWeekDescription(week.description?.trim() ?? "");
+    setCourseWeekOrder(String(Math.max(1, Number(week.weekOrder ?? 1))));
     setShowCreateCourseWeekModal(true);
     setCourseMessage("");
   };
@@ -4291,21 +4306,26 @@ export default function DashboardPage() {
     setCourseMessage("");
   };
 
+  const resolveCourseIdBySession = (sessionId: number): number | null => {
+    const currentCourseModule = parseCourseModulePayload(payload);
+    const openedCourseContainsSession =
+      openedCourseId != null &&
+      currentCourseModule.courses.some(
+        (course) => course.id === openedCourseId && (course.sessions ?? []).some((session) => session.id === sessionId),
+      );
+    return openedCourseContainsSession
+      ? openedCourseId
+      : (currentCourseModule.courses.find((course) => (course.sessions ?? []).some((session) => session.id === sessionId))
+          ?.id ?? null);
+  };
+
   const onCreateCourseWeek = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!user || addingWeekSessionId == null) {
       return;
     }
 
-    const currentCourseModule = parseCourseModulePayload(payload);
-    const resolvedCourseId =
-      openedCourseId != null &&
-      currentCourseModule.courses.some(
-        (course) => course.id === openedCourseId && (course.sessions ?? []).some((session) => session.id === addingWeekSessionId),
-      )
-        ? openedCourseId
-        : (currentCourseModule.courses.find((course) => (course.sessions ?? []).some((session) => session.id === addingWeekSessionId))
-            ?.id ?? null);
+    const resolvedCourseId = resolveCourseIdBySession(addingWeekSessionId);
 
     if (resolvedCourseId == null) {
       setCourseFeedback("No se encontro el curso de la sesion.", "error");
@@ -4319,15 +4339,24 @@ export default function DashboardPage() {
     setCreatingCourseWeek(true);
     setCourseMessage("");
     try {
-      await postJson(`/api/v1/courses/${resolvedCourseId}/sessions/${addingWeekSessionId}/weeks`, user.token, {
+      const body = {
         userId: user.id,
         name: weekName || null,
         description: weekDescription || null,
         weekOrder: Number.isFinite(weekOrder) && weekOrder > 0 ? weekOrder : null,
-      });
+      };
+      if (editingCourseWeekId == null) {
+        await postJson(`/api/v1/courses/${resolvedCourseId}/sessions/${addingWeekSessionId}/weeks`, user.token, body);
+      } else {
+        await patchJson(
+          `/api/v1/courses/${resolvedCourseId}/sessions/${addingWeekSessionId}/weeks/${editingCourseWeekId}`,
+          user.token,
+          body,
+        );
+      }
       await refreshCourses();
       resetCourseWeekEditor();
-      setCourseFeedback("Semana creada.", "success");
+      setCourseFeedback(editingCourseWeekId == null ? "Semana creada." : "Semana actualizada.", "success");
     } catch (weekError) {
       if (weekError instanceof Error) {
         setCourseFeedback(weekError.message, "error");
@@ -4336,6 +4365,41 @@ export default function DashboardPage() {
       }
     } finally {
       setCreatingCourseWeek(false);
+    }
+  };
+
+  const onDeleteCourseWeek = async (session: CourseSessionItem, week: CourseWeekItem) => {
+    if (!user) {
+      return;
+    }
+    const resolvedCourseId = resolveCourseIdBySession(session.id);
+    if (resolvedCourseId == null) {
+      setCourseFeedback("No se encontro el curso de la sesion.", "error");
+      return;
+    }
+    const weekName = (week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim();
+    const confirmDelete = window.confirm(`Se eliminara "${weekName}" con todos sus contenidos. Deseas continuar?`);
+    if (!confirmDelete) {
+      return;
+    }
+
+    setDeletingCourseWeekId(week.id);
+    setCourseMessage("");
+    try {
+      await deleteJson(
+        `/api/v1/courses/${resolvedCourseId}/sessions/${session.id}/weeks/${week.id}?userId=${user.id}`,
+        user.token,
+      );
+      await refreshCourses();
+      setCourseFeedback("Semana eliminada.", "success");
+    } catch (weekError) {
+      if (weekError instanceof Error) {
+        setCourseFeedback(weekError.message, "error");
+      } else {
+        setCourseFeedback("No se pudo eliminar la semana.", "error");
+      }
+    } finally {
+      setDeletingCourseWeekId(null);
     }
   };
 
@@ -10585,14 +10649,47 @@ export default function DashboardPage() {
                                     {session.weeks && session.weeks.length > 0 ? (
                                       <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                                         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Semanas</p>
-                                        <div className="mt-1 flex flex-wrap gap-2">
+                                        <div className="mt-2 space-y-2">
                                           {session.weeks.map((week) => (
-                                            <span
+                                            <div
                                               key={`session-week-${session.id}-${week.id}`}
-                                              className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700"
+                                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-2 py-1.5"
                                             >
-                                              {(week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim()}
-                                            </span>
+                                              <div className="min-w-0">
+                                                <p className="truncate text-[11px] font-semibold text-indigo-700">
+                                                  {(week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim()}
+                                                </p>
+                                                {week.description?.trim() ? (
+                                                  <p className="truncate text-[10px] text-indigo-600">{week.description.trim()}</p>
+                                                ) : null}
+                                              </div>
+                                              {openedCourseIsOwner ? (
+                                                <div className="flex items-center gap-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => onOpenAddSessionContentModal(session, week.id)}
+                                                    className="rounded-md border border-blue-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
+                                                  >
+                                                    Añadir contenido
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => onOpenEditCourseWeekModal(session, week)}
+                                                    className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                                                  >
+                                                    Editar
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => void onDeleteCourseWeek(session, week)}
+                                                    disabled={deletingCourseWeekId === week.id}
+                                                    className="rounded-md border border-rose-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-60"
+                                                  >
+                                                    {deletingCourseWeekId === week.id ? "..." : "Eliminar"}
+                                                  </button>
+                                                </div>
+                                              ) : null}
+                                            </div>
                                           ))}
                                         </div>
                                       </div>
@@ -11820,7 +11917,7 @@ export default function DashboardPage() {
 
           {showCreateCourseWeekModal && addingWeekSessionId != null ? (
             <ModalShell
-              title={`Crear semana: ${addingWeekSessionName || "Sesion"}`}
+              title={`${editingCourseWeekId == null ? "Crear semana" : "Editar semana"}: ${addingWeekSessionName || "Sesion"}`}
               onClose={resetCourseWeekEditor}
             >
               <form onSubmit={onCreateCourseWeek} className="space-y-3">
@@ -11856,7 +11953,13 @@ export default function DashboardPage() {
                     disabled={creatingCourseWeek}
                     className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
                   >
-                    {creatingCourseWeek ? "Creando..." : "Crear semana"}
+                    {creatingCourseWeek
+                      ? editingCourseWeekId == null
+                        ? "Creando..."
+                        : "Guardando..."
+                      : editingCourseWeekId == null
+                        ? "Crear semana"
+                        : "Guardar cambios"}
                   </button>
                 </div>
               </form>
