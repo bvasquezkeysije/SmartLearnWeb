@@ -160,9 +160,12 @@ type ExamGroupState = {
   phase?: "open" | "review" | string | null;
   phaseStartedAt?: string | null;
   phaseEndsAt?: string | null;
+  phaseStartedAtEpochMs?: number | null;
+  phaseEndsAtEpochMs?: number | null;
   questionVersion?: number | null;
   reviewActive?: boolean | null;
   reviewSecondsRemaining?: number | null;
+  serverNowEpochMs?: number | null;
   startedAt?: unknown;
   finishedAt?: unknown;
 };
@@ -2071,12 +2074,14 @@ export default function DashboardPage() {
   const suppressGroupRoomClosedModalRef = useRef(false);
   const groupReviewRefreshInFlightRef = useRef(false);
   const groupInputQuestionKeyRef = useRef<string | null>(null);
+  const groupServerClockOffsetMsRef = useRef(0);
   const [groupAnswersByQuestionKey, setGroupAnswersByQuestionKey] = useState<Record<string, ExamGroupCurrentAnswer[]>>({});
   const groupQuestionStartedAt = groupPracticeState?.questionStartedAt ?? null;
   const groupQuestionStartedAtEpochMs = groupPracticeState?.questionStartedAtEpochMs ?? null;
   const groupFirstResponderName = groupPracticeState?.firstResponderName ?? null;
   const groupFirstAnswerElapsedSeconds = groupPracticeState?.firstAnswerElapsedSeconds ?? null;
   const groupCanStartGroup = Boolean(groupPracticeState?.canStartGroup);
+  const getGroupServerNowMs = () => Date.now() + groupServerClockOffsetMsRef.current;
   const [groupAutoAdvanceSecondsLeft, setGroupAutoAdvanceSecondsLeft] = useState<number | null>(null);
   const [groupSubmittedQuestionKey, setGroupSubmittedQuestionKey] = useState<string | null>(null);
   const [groupDraftQuestionKey, setGroupDraftQuestionKey] = useState<string | null>(null);
@@ -8329,6 +8334,14 @@ export default function DashboardPage() {
     });
   }, [showGroupPracticeRunnerModal, groupPracticeState]);
 
+  useEffect(() => {
+    const serverNow = Number(groupPracticeState?.serverNowEpochMs ?? 0);
+    if (!Number.isFinite(serverNow) || serverNow <= 0) {
+      return;
+    }
+    groupServerClockOffsetMsRef.current = serverNow - Date.now();
+  }, [groupPracticeState?.serverNowEpochMs]);
+
 
   useEffect(() => {
     if (!showGroupPracticeRunnerModal || !groupPracticeState || groupPracticeState.status !== "active" || !groupPracticeState.currentQuestion) {
@@ -8341,7 +8354,7 @@ export default function DashboardPage() {
     const questionRuntimeKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`;
     const timerLimit = Math.max(0, groupPracticeState.currentQuestion.temporizadorSegundos ?? 0);
     const parsedStartedAt = toMillisOrZero(groupQuestionStartedAtEpochMs ?? groupQuestionStartedAt);
-    const startedAtMs = parsedStartedAt > 0 ? parsedStartedAt : Date.now();
+    const startedAtMs = parsedStartedAt > 0 ? parsedStartedAt : getGroupServerNowMs();
     if (groupQuestionRuntimeKeyRef.current !== questionRuntimeKey) {
       groupQuestionRuntimeKeyRef.current = questionRuntimeKey;
       setGroupTimerExpired(false);
@@ -8353,7 +8366,7 @@ export default function DashboardPage() {
     }
 
     const tick = () => {
-      const elapsed = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+      const elapsed = Math.max(0, Math.floor((getGroupServerNowMs() - startedAtMs) / 1000));
       setGroupQuestionElapsedSeconds(elapsed);
       if (timerLimit > 0) {
         setGroupQuestionRemainingSeconds(Math.max(0, timerLimit - elapsed));
@@ -8374,6 +8387,7 @@ export default function DashboardPage() {
     groupPracticeState?.currentQuestion?.temporizadorSegundos,
     groupQuestionStartedAt,
     groupQuestionStartedAtEpochMs,
+    groupPracticeState?.serverNowEpochMs,
   ]);
 
   useEffect(() => {
@@ -8479,11 +8493,9 @@ export default function DashboardPage() {
         ? `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`
         : null;
     const serverReviewActive = Boolean(groupPracticeState?.reviewActive);
-    const serverReviewRemainingRaw = Number(groupPracticeState?.reviewSecondsRemaining ?? 0);
-    const serverReviewRemaining = Number.isFinite(serverReviewRemainingRaw)
-      ? Math.max(0, Math.floor(serverReviewRemainingRaw))
-      : 0;
-    if (currentQuestionKey == null || !serverReviewActive || serverReviewRemaining <= 0) {
+    const phaseEndsAtMs = toMillisOrZero(groupPracticeState?.phaseEndsAtEpochMs ?? groupPracticeState?.phaseEndsAt);
+
+    if (currentQuestionKey == null || !serverReviewActive) {
       setGroupAutoAdvanceSecondsLeft(null);
       groupReviewQuestionKeyRef.current = null;
       groupReviewStartedAtMsRef.current = null;
@@ -8491,16 +8503,10 @@ export default function DashboardPage() {
     }
 
     const isNewReviewWindow = groupReviewQuestionKeyRef.current !== currentQuestionKey;
-    if (isNewReviewWindow || groupReviewStartedAtMsRef.current == null) {
+    if (isNewReviewWindow || groupReviewStartedAtMsRef.current == null || !phaseEndsAtMs) {
       groupReviewQuestionKeyRef.current = currentQuestionKey;
-      groupReviewStartedAtMsRef.current = Date.now();
-      setGroupAutoAdvanceSecondsLeft(serverReviewRemaining);
-    } else {
-      setGroupAutoAdvanceSecondsLeft(serverReviewRemaining);
+      groupReviewStartedAtMsRef.current = getGroupServerNowMs();
     }
-
-    const localCountdownStartMs = Date.now();
-    const localCountdownInitial = serverReviewRemaining;
 
     const refreshReviewState = () => {
       if (!user || !selectedExam || !groupPracticeState) {
@@ -8535,8 +8541,11 @@ export default function DashboardPage() {
     }
 
     const updateCountdown = () => {
-      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - localCountdownStartMs) / 1000));
-      const remaining = Math.max(0, localCountdownInitial - elapsedSeconds);
+      if (!phaseEndsAtMs) {
+        setGroupAutoAdvanceSecondsLeft(0);
+        return 0;
+      }
+      const remaining = Math.max(0, Math.ceil((phaseEndsAtMs - getGroupServerNowMs()) / 1000));
       setGroupAutoAdvanceSecondsLeft(remaining);
       return remaining;
     };
@@ -8544,23 +8553,14 @@ export default function DashboardPage() {
     updateCountdown();
     const countdownHandle = window.setInterval(() => {
       updateCountdown();
-    }, 1000);
+    }, 500);
     const refreshHandle = window.setInterval(() => {
       refreshReviewState();
-    }, 2500);
-
-    const remainingMs = Math.max(0, localCountdownInitial * 1000);
-
-    const timeoutHandle = window.setTimeout(() => {
-      if (groupCanStartGroup && !advancingGroupQuestion) {
-        void onAdvanceGroupPracticeStep();
-      }
-    }, remainingMs);
+    }, 1000);
 
     return () => {
       window.clearInterval(countdownHandle);
       window.clearInterval(refreshHandle);
-      window.clearTimeout(timeoutHandle);
       groupReviewRefreshInFlightRef.current = false;
     };
   }, [
@@ -8571,10 +8571,11 @@ export default function DashboardPage() {
     groupPracticeState?.currentQuestion?.id,
     groupPracticeState?.reviewActive,
     groupPracticeState?.reviewSecondsRemaining,
+    groupPracticeState?.phaseEndsAt,
+    groupPracticeState?.phaseEndsAtEpochMs,
+    groupPracticeState?.serverNowEpochMs,
     user,
     selectedExam,
-    groupCanStartGroup,
-    advancingGroupQuestion,
   ]);
 
   const selectedSala = useMemo(
