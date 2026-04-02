@@ -157,6 +157,8 @@ type ExamGroupState = {
   firstAnswerElapsedSeconds?: number | null;
   questionStartedAt?: string | null;
   questionStartedAtEpochMs?: number | null;
+  reviewActive?: boolean | null;
+  reviewSecondsRemaining?: number | null;
   startedAt?: unknown;
   finishedAt?: unknown;
 };
@@ -1937,6 +1939,7 @@ export default function DashboardPage() {
   const [editingCourseSessionId, setEditingCourseSessionId] = useState<number | null>(null);
   const [editingCourseSessionName, setEditingCourseSessionName] = useState("");
   const [editingCourseSessionWeeklyContent, setEditingCourseSessionWeeklyContent] = useState("");
+  const [deletingCourseSessionId, setDeletingCourseSessionId] = useState<number | null>(null);
   const [expandedSessionId, setExpandedSessionId] = useState<number | null>(null);
   const [showAddSessionContentModal, setShowAddSessionContentModal] = useState(false);
   const [addingContentSessionId, setAddingContentSessionId] = useState<number | null>(null);
@@ -1953,6 +1956,7 @@ export default function DashboardPage() {
   const [sessionWordFileName, setSessionWordFileName] = useState("");
   const [sessionWordFileData, setSessionWordFileData] = useState<string | null>(null);
   const [sessionExamSourceId, setSessionExamSourceId] = useState("");
+  const [deletingSessionContentId, setDeletingSessionContentId] = useState<number | null>(null);
   const [creatingCourseSession, setCreatingCourseSession] = useState(false);
   const [updatingCourseSession, setUpdatingCourseSession] = useState(false);
   const [savingSessionContent, setSavingSessionContent] = useState(false);
@@ -4096,6 +4100,63 @@ export default function DashboardPage() {
     }
   };
 
+  const onDeleteCourseSession = async (session: CourseSessionItem) => {
+    if (!user) {
+      return;
+    }
+
+    const currentCourseModule = parseCourseModulePayload(payload);
+    const openedCourseContainsSession =
+      openedCourseId != null &&
+      currentCourseModule.courses.some(
+        (course) => course.id === openedCourseId && (course.sessions ?? []).some((item) => item.id === session.id),
+      );
+    const resolvedCourseId =
+      openedCourseContainsSession
+        ? openedCourseId
+        : (currentCourseModule.courses.find((course) => (course.sessions ?? []).some((item) => item.id === session.id))?.id ??
+          null);
+    if (resolvedCourseId == null) {
+      setCourseFeedback("No se encontro el curso de la sesion.", "error");
+      return;
+    }
+
+    const confirmDelete = window.confirm(
+      `Se eliminara la sesion "${formatSessionName(session.name)}" y todos sus contenidos. Deseas continuar?`,
+    );
+    if (!confirmDelete) {
+      return;
+    }
+
+    setDeletingCourseSessionId(session.id);
+    setCourseMessage("");
+    try {
+      await deleteJson(`/api/v1/courses/${resolvedCourseId}/sessions/${session.id}?userId=${user.id}`, user.token);
+      if (expandedSessionId === session.id) {
+        setExpandedSessionId(null);
+      }
+      if (editingCourseSessionId === session.id) {
+        setShowEditCourseSessionModal(false);
+        setEditingCourseSessionId(null);
+        setEditingCourseSessionName("");
+        setEditingCourseSessionWeeklyContent("");
+      }
+      if (openedCourseId == null || openedCourseId !== resolvedCourseId) {
+        setOpenedCourseId(resolvedCourseId);
+      }
+      await refreshCourses();
+      setCourseFeedback("Sesion eliminada correctamente.", "success");
+    } catch (deleteSessionError) {
+      if (deleteSessionError instanceof Error) {
+        setCourseFeedback(deleteSessionError.message, "error");
+      } else {
+        setCourseFeedback("No se pudo eliminar la sesion.", "error");
+      }
+    } finally {
+      setDeletingCourseSessionId(null);
+    }
+  };
+
   const resetSessionContentEditor = () => {
     setShowAddSessionContentModal(false);
     setAddingContentSessionId(null);
@@ -4301,6 +4362,56 @@ export default function DashboardPage() {
       }
     } finally {
       setSavingSessionContent(false);
+    }
+  };
+
+  const onDeleteSessionContent = async (session: CourseSessionItem, content: CourseSessionContentItem) => {
+    if (!user) {
+      return;
+    }
+
+    const currentCourseModule = parseCourseModulePayload(payload);
+    const openedCourseContainsSession =
+      openedCourseId != null &&
+      currentCourseModule.courses.some(
+        (course) => course.id === openedCourseId && (course.sessions ?? []).some((item) => item.id === session.id),
+      );
+    const resolvedCourseId =
+      openedCourseContainsSession
+        ? openedCourseId
+        : (currentCourseModule.courses.find((course) => (course.sessions ?? []).some((item) => item.id === session.id))?.id ??
+          null);
+    if (resolvedCourseId == null) {
+      setCourseFeedback("No se encontro el curso de la sesion.", "error");
+      return;
+    }
+
+    const contentName = content.title?.trim() || "contenido";
+    const confirmDelete = window.confirm(`Se eliminara "${contentName}". Deseas continuar?`);
+    if (!confirmDelete) {
+      return;
+    }
+
+    setDeletingSessionContentId(content.id);
+    setCourseMessage("");
+    try {
+      await deleteJson(
+        `/api/v1/courses/${resolvedCourseId}/sessions/${session.id}/contents/${content.id}?userId=${user.id}`,
+        user.token,
+      );
+      if (openedCourseId == null || openedCourseId !== resolvedCourseId) {
+        setOpenedCourseId(resolvedCourseId);
+      }
+      await refreshCourses();
+      setCourseFeedback("Contenido eliminado correctamente.", "success");
+    } catch (deleteContentError) {
+      if (deleteContentError instanceof Error) {
+        setCourseFeedback(deleteContentError.message, "error");
+      } else {
+        setCourseFeedback("No se pudo eliminar el contenido.", "error");
+      }
+    } finally {
+      setDeletingSessionContentId(null);
     }
   };
 
@@ -8357,35 +8468,29 @@ export default function DashboardPage() {
       groupPracticeState && groupPracticeState.currentQuestion
         ? `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`
         : null;
-    const allAnswered = Boolean(groupPracticeState?.allAnsweredCurrent);
-    const expiredForCurrent =
-      Boolean(groupTimerExpired) &&
-      currentQuestionKey != null &&
-      groupTimerExpiredQuestionKey === currentQuestionKey;
-    const shouldRevealResults = expiredForCurrent || allAnswered;
-    const hasActiveReviewWindow =
-      currentQuestionKey != null &&
-      groupReviewQuestionKeyRef.current === currentQuestionKey &&
-      groupReviewStartedAtMsRef.current != null;
-    if (currentQuestionKey == null || (!shouldRevealResults && !hasActiveReviewWindow)) {
+    const serverReviewActive = Boolean(groupPracticeState?.reviewActive);
+    const serverReviewRemainingRaw = Number(groupPracticeState?.reviewSecondsRemaining ?? 0);
+    const serverReviewRemaining = Number.isFinite(serverReviewRemainingRaw)
+      ? Math.max(0, Math.floor(serverReviewRemainingRaw))
+      : 0;
+    if (currentQuestionKey == null || !serverReviewActive || serverReviewRemaining <= 0) {
       setGroupAutoAdvanceSecondsLeft(null);
       groupReviewQuestionKeyRef.current = null;
       groupReviewStartedAtMsRef.current = null;
       return;
     }
 
-    const revealSeconds = Math.max(1, Number(groupPracticeState.currentQuestion?.reviewSeconds ?? 10));
     const isNewReviewWindow = groupReviewQuestionKeyRef.current !== currentQuestionKey;
     if (isNewReviewWindow || groupReviewStartedAtMsRef.current == null) {
       groupReviewQuestionKeyRef.current = currentQuestionKey;
       groupReviewStartedAtMsRef.current = Date.now();
-      setGroupAutoAdvanceSecondsLeft(revealSeconds);
+      setGroupAutoAdvanceSecondsLeft(serverReviewRemaining);
+    } else {
+      setGroupAutoAdvanceSecondsLeft(serverReviewRemaining);
     }
 
-    const reviewStartedAt = groupReviewStartedAtMsRef.current;
-    if (reviewStartedAt == null) {
-      return;
-    }
+    const localCountdownStartMs = Date.now();
+    const localCountdownInitial = serverReviewRemaining;
 
     const refreshReviewState = () => {
       if (!user || !selectedExam || !groupPracticeState) {
@@ -8420,8 +8525,8 @@ export default function DashboardPage() {
     }
 
     const updateCountdown = () => {
-      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - reviewStartedAt) / 1000));
-      const remaining = Math.max(0, revealSeconds - elapsedSeconds);
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - localCountdownStartMs) / 1000));
+      const remaining = Math.max(0, localCountdownInitial - elapsedSeconds);
       setGroupAutoAdvanceSecondsLeft(remaining);
       return remaining;
     };
@@ -8434,8 +8539,7 @@ export default function DashboardPage() {
       refreshReviewState();
     }, 2500);
 
-    const elapsedMs = Math.max(0, Date.now() - reviewStartedAt);
-    const remainingMs = Math.max(0, revealSeconds * 1000 - elapsedMs);
+    const remainingMs = Math.max(0, localCountdownInitial * 1000);
 
     const timeoutHandle = window.setTimeout(() => {
       if (groupCanStartGroup && !advancingGroupQuestion) {
@@ -8455,11 +8559,10 @@ export default function DashboardPage() {
     groupPracticeState?.sessionId,
     groupPracticeState?.currentQuestionIndex,
     groupPracticeState?.currentQuestion?.id,
-    groupPracticeState?.allAnsweredCurrent,
+    groupPracticeState?.reviewActive,
+    groupPracticeState?.reviewSecondsRemaining,
     user,
     selectedExam,
-    groupTimerExpired,
-    groupTimerExpiredQuestionKey,
     groupCanStartGroup,
     advancingGroupQuestion,
   ]);
@@ -10300,25 +10403,54 @@ export default function DashboardPage() {
                                   <p className="text-sm font-semibold text-[#004aad]">{formatSessionName(session.name)}</p>
                                   <div className="flex items-center gap-1">
                                     {openedCourseIsOwner ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => onOpenEditCourseSession(session)}
-                                        title="Editar sesion"
-                                        aria-label="Editar sesion"
-                                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                                      >
-                                        <svg
-                                          xmlns="http://www.w3.org/2000/svg"
-                                          viewBox="0 0 24 24"
-                                          fill="none"
-                                          stroke="currentColor"
-                                          strokeWidth="2"
-                                          className="h-3.5 w-3.5"
+                                      <>
+                                        <button
+                                          type="button"
+                                          onClick={() => onOpenEditCourseSession(session)}
+                                          title="Editar sesion"
+                                          aria-label="Editar sesion"
+                                          disabled={deletingCourseSessionId === session.id}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-60"
                                         >
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="m3 21 3.8-1 11.4-11.4a2.1 2.1 0 0 0-3-3L3.8 17 3 21z" />
-                                          <path strokeLinecap="round" strokeLinejoin="round" d="m14.5 6.5 3 3" />
-                                        </svg>
-                                      </button>
+                                          <svg
+                                            xmlns="http://www.w3.org/2000/svg"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            className="h-3.5 w-3.5"
+                                          >
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="m3 21 3.8-1 11.4-11.4a2.1 2.1 0 0 0-3-3L3.8 17 3 21z" />
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="m14.5 6.5 3 3" />
+                                          </svg>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => void onDeleteCourseSession(session)}
+                                          title="Eliminar sesion"
+                                          aria-label="Eliminar sesion"
+                                          disabled={deletingCourseSessionId === session.id}
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                                        >
+                                          {deletingCourseSessionId === session.id ? (
+                                            <span className="text-[10px] font-semibold">...</span>
+                                          ) : (
+                                            <svg
+                                              xmlns="http://www.w3.org/2000/svg"
+                                              viewBox="0 0 24 24"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="2"
+                                              className="h-3.5 w-3.5"
+                                            >
+                                              <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" d="M8 6V4h8v2" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 6l-1 14H6L5 6" />
+                                              <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
+                                            </svg>
+                                          )}
+                                        </button>
+                                      </>
                                     ) : null}
                                     <button
                                       type="button"
@@ -10434,25 +10566,54 @@ export default function DashboardPage() {
                                                   ) : null}
                                                 </div>
                                                 {openedCourseIsOwner ? (
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => onOpenEditSessionContentModal(session, content)}
-                                                    title="Editar contenido"
-                                                    aria-label="Editar contenido"
-                                                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
-                                                  >
-                                                    <svg
-                                                      xmlns="http://www.w3.org/2000/svg"
-                                                      viewBox="0 0 24 24"
-                                                      fill="none"
-                                                      stroke="currentColor"
-                                                      strokeWidth="2"
-                                                      className="h-3.5 w-3.5"
+                                                  <div className="flex items-center gap-1">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => onOpenEditSessionContentModal(session, content)}
+                                                      title="Editar contenido"
+                                                      aria-label="Editar contenido"
+                                                      disabled={deletingSessionContentId === content.id}
+                                                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-60"
                                                     >
-                                                      <path strokeLinecap="round" strokeLinejoin="round" d="m3 21 3.8-1 11.4-11.4a2.1 2.1 0 0 0-3-3L3.8 17 3 21z" />
-                                                      <path strokeLinecap="round" strokeLinejoin="round" d="m14.5 6.5 3 3" />
-                                                    </svg>
-                                                  </button>
+                                                      <svg
+                                                        xmlns="http://www.w3.org/2000/svg"
+                                                        viewBox="0 0 24 24"
+                                                        fill="none"
+                                                        stroke="currentColor"
+                                                        strokeWidth="2"
+                                                        className="h-3.5 w-3.5"
+                                                      >
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="m3 21 3.8-1 11.4-11.4a2.1 2.1 0 0 0-3-3L3.8 17 3 21z" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="m14.5 6.5 3 3" />
+                                                      </svg>
+                                                    </button>
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => void onDeleteSessionContent(session, content)}
+                                                      title="Eliminar contenido"
+                                                      aria-label="Eliminar contenido"
+                                                      disabled={deletingSessionContentId === content.id}
+                                                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60"
+                                                    >
+                                                      {deletingSessionContentId === content.id ? (
+                                                        <span className="text-[10px] font-semibold">...</span>
+                                                      ) : (
+                                                        <svg
+                                                          xmlns="http://www.w3.org/2000/svg"
+                                                          viewBox="0 0 24 24"
+                                                          fill="none"
+                                                          stroke="currentColor"
+                                                          strokeWidth="2"
+                                                          className="h-3.5 w-3.5"
+                                                        >
+                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
+                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 6V4h8v2" />
+                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 6l-1 14H6L5 6" />
+                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
+                                                        </svg>
+                                                      )}
+                                                    </button>
+                                                  </div>
                                                 ) : null}
                                               </div>
                                             );
@@ -12133,14 +12294,12 @@ export default function DashboardPage() {
 
             return toNumericScore(a.rank) - toNumericScore(b.rank);
           });
-        const allConnectedAnsweredCurrent = Boolean(groupPracticeState.allAnsweredCurrent);
-        const expiredForCurrentQuestion =
-          Boolean(groupTimerExpired) &&
-          currentGroupQuestionKey != null &&
-          groupTimerExpiredQuestionKey === currentGroupQuestionKey;
-        const shouldRevealCurrentQuestion = expiredForCurrentQuestion || allConnectedAnsweredCurrent;
+        const isCurrentRuntimeQuestion =
+          currentGroupQuestionKey != null && groupQuestionRuntimeKeyRef.current === currentGroupQuestionKey;
+        const serverReviewActive = Boolean(groupPracticeState.reviewActive);
         const isReviewWindow =
-          shouldRevealCurrentQuestion &&
+          isCurrentRuntimeQuestion &&
+          serverReviewActive &&
           groupAutoAdvanceSecondsLeft != null &&
           groupAutoAdvanceSecondsLeft > 0 &&
           currentGroupQuestionKey != null &&
@@ -12448,7 +12607,7 @@ export default function DashboardPage() {
                                         setPracticeSelectedOption(key);
                                         setGroupDraftQuestionKey(currentGroupQuestionKey);
                                       }}
-                                      disabled={myAnswered || submittingGroupAnswer}
+                                      disabled={myAnswered || submittingGroupAnswer || isReviewWindow}
                                     />
                                     <span>{value}</span>
                                   </label>
@@ -12510,7 +12669,7 @@ export default function DashboardPage() {
                                   setGroupDraftQuestionKey(currentGroupQuestionKey);
                                 }}
                                 placeholder="Tu respuesta grupal"
-                                disabled={myAnswered || submittingGroupAnswer}
+                                disabled={myAnswered || submittingGroupAnswer || isReviewWindow}
                                 className="min-h-24 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400 disabled:bg-slate-100"
                               />
                             </div>
@@ -12606,7 +12765,7 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={() => void onSubmitGroupPracticeStep()}
-                          disabled={myAnswered || submittingGroupAnswer || groupPracticeState.status !== "active"}
+                          disabled={myAnswered || submittingGroupAnswer || groupPracticeState.status !== "active" || isReviewWindow}
                           className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                         >
                           {myAnswered ? "Respuesta enviada" : submittingGroupAnswer ? "Enviando..." : "Enviar"}
