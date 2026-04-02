@@ -10983,6 +10983,16 @@ export default function DashboardPage() {
                                                               : contentType === "cover"
                                                                 ? "Portada"
                                                                 : "Contenido";
+                                                    const hasExternalLink = Boolean(content.externalLink?.trim());
+                                                    const hasFileData = Boolean(content.fileData?.trim());
+                                                    const canPreviewInline =
+                                                      (contentType === "video" && hasExternalLink) ||
+                                                      ((contentType === "pdf" || contentType === "word") && hasFileData);
+                                                    const openUrl = hasExternalLink
+                                                      ? (content.externalLink?.trim() ?? "")
+                                                      : (hasFileData ? (content.fileData?.trim() ?? "") : "");
+                                                    const canDownloadDocument =
+                                                      (contentType === "pdf" || contentType === "word") && hasFileData;
                                                     return (
                                                       <div
                                                         key={`week-content-${week.id}-${content.id}`}
@@ -11064,7 +11074,38 @@ export default function DashboardPage() {
                                                               </button>
                                                             )}
                                                           </div>
-                                                        ) : null}
+                                                        ) : (
+                                                          <div className="mt-2 flex flex-wrap items-center gap-2">
+                                                            {canPreviewInline ? (
+                                                              <button
+                                                                type="button"
+                                                                onClick={() => onOpenCourseContentPreview(content)}
+                                                                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
+                                                              >
+                                                                Ver
+                                                              </button>
+                                                            ) : null}
+                                                            {openUrl ? (
+                                                              <a
+                                                                href={openUrl}
+                                                                target="_blank"
+                                                                rel="noreferrer"
+                                                                className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
+                                                              >
+                                                                Abrir
+                                                              </a>
+                                                            ) : null}
+                                                            {canDownloadDocument ? (
+                                                              <a
+                                                                href={content.fileData?.trim() ?? ""}
+                                                                download={content.fileName?.trim() || `${content.title?.trim() || "documento"}.${contentType === "pdf" ? "pdf" : "docx"}`}
+                                                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                                                              >
+                                                                Descargar
+                                                              </a>
+                                                            ) : null}
+                                                          </div>
+                                                        )}
                                                       </div>
                                                     );
                                                   });
