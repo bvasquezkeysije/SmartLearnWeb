@@ -7607,13 +7607,14 @@ export default function DashboardPage() {
     const writtenAnswer = practiceWrittenAnswer.trim();
     const hasDraftForCurrentQuestion = groupDraftQuestionKey === submitQuestionKey;
     const selectedOptionForCurrentQuestion =
-      currentQuestion.questionType === "multiple_choice" && hasDraftForCurrentQuestion
+      currentQuestion.questionType === "multiple_choice" &&
+      (hasDraftForCurrentQuestion || forceSubmit)
         ? practiceSelectedOption
         : null;
     const writtenAnswerForCurrentQuestion =
       currentQuestion.questionType === "multiple_choice"
         ? ""
-        : hasDraftForCurrentQuestion
+        : hasDraftForCurrentQuestion || forceSubmit
           ? writtenAnswer
           : "";
     const submittedHasContent =
@@ -7672,7 +7673,11 @@ export default function DashboardPage() {
         }
       }
       if (forceSubmit) {
-        setExamFeedback("Tiempo agotado. Respuesta enviada.", "info");
+        if (submittedHasContent) {
+          setExamFeedback("Tiempo agotado. Se envio tu respuesta seleccionada.", "info");
+        } else {
+          setExamFeedback("Tiempo agotado. Esta pregunta quedo sin respuesta.", "info");
+        }
       } else {
         setExamFeedback("Respuesta grupal enviada.", "success");
       }
