@@ -163,6 +163,7 @@ type ExamGroupState = {
   phaseStartedAtEpochMs?: number | null;
   phaseEndsAtEpochMs?: number | null;
   questionVersion?: number | null;
+  revealAnswers?: boolean | null;
   reviewActive?: boolean | null;
   reviewSecondsRemaining?: number | null;
   serverNowEpochMs?: number | null;
@@ -336,8 +337,20 @@ type CourseSessionContentItem = {
   externalLink?: string | null;
   fileName?: string | null;
   fileData?: string | null;
+  weekId?: number | null;
+  weekOrder?: number | null;
+  weekName?: string | null;
   sourceExamId?: number | null;
   sourceExamName?: string | null;
+  createdAt?: unknown;
+};
+
+type CourseWeekItem = {
+  id: number;
+  weekOrder?: number | null;
+  name?: string | null;
+  description?: string | null;
+  contents?: CourseSessionContentItem[];
   createdAt?: unknown;
 };
 
@@ -356,6 +369,7 @@ type CourseSessionItem = {
   id: number;
   name: string;
   weeklyContent?: string | null;
+  weeks?: CourseWeekItem[];
   contents?: CourseSessionContentItem[];
   createdAt?: unknown;
 };
@@ -1949,6 +1963,12 @@ export default function DashboardPage() {
   const [deletingCourseSessionId, setDeletingCourseSessionId] = useState<number | null>(null);
   const [expandedSessionId, setExpandedSessionId] = useState<number | null>(null);
   const [showAddSessionContentModal, setShowAddSessionContentModal] = useState(false);
+  const [showCreateCourseWeekModal, setShowCreateCourseWeekModal] = useState(false);
+  const [addingWeekSessionId, setAddingWeekSessionId] = useState<number | null>(null);
+  const [addingWeekSessionName, setAddingWeekSessionName] = useState("");
+  const [courseWeekName, setCourseWeekName] = useState("");
+  const [courseWeekDescription, setCourseWeekDescription] = useState("");
+  const [courseWeekOrder, setCourseWeekOrder] = useState("");
   const [addingContentSessionId, setAddingContentSessionId] = useState<number | null>(null);
   const [addingContentSessionName, setAddingContentSessionName] = useState("");
   const [editingSessionContentId, setEditingSessionContentId] = useState<number | null>(null);
@@ -1963,10 +1983,12 @@ export default function DashboardPage() {
   const [sessionWordFileName, setSessionWordFileName] = useState("");
   const [sessionWordFileData, setSessionWordFileData] = useState<string | null>(null);
   const [sessionExamSourceId, setSessionExamSourceId] = useState("");
+  const [sessionContentWeekId, setSessionContentWeekId] = useState("");
   const [deletingSessionContentId, setDeletingSessionContentId] = useState<number | null>(null);
   const [creatingCourseSession, setCreatingCourseSession] = useState(false);
   const [updatingCourseSession, setUpdatingCourseSession] = useState(false);
   const [savingSessionContent, setSavingSessionContent] = useState(false);
+  const [creatingCourseWeek, setCreatingCourseWeek] = useState(false);
   const [creatingCourse, setCreatingCourse] = useState(false);
   const [showCreateCourseModal, setShowCreateCourseModal] = useState(false);
   const [showEditCourseModal, setShowEditCourseModal] = useState(false);
@@ -4180,6 +4202,16 @@ export default function DashboardPage() {
     setSessionWordFileName("");
     setSessionWordFileData(null);
     setSessionExamSourceId("");
+    setSessionContentWeekId("");
+  };
+
+  const resetCourseWeekEditor = () => {
+    setShowCreateCourseWeekModal(false);
+    setAddingWeekSessionId(null);
+    setAddingWeekSessionName("");
+    setCourseWeekName("");
+    setCourseWeekDescription("");
+    setCourseWeekOrder("");
   };
 
   const resetCourseCompetencyEditor = () => {
@@ -4200,6 +4232,7 @@ export default function DashboardPage() {
   };
 
   const onOpenAddSessionContentModal = (session: CourseSessionItem) => {
+    const defaultWeekId = (session.weeks ?? [])[0]?.id;
     setAddingContentSessionId(session.id);
     setAddingContentSessionName(session.name);
     setEditingSessionContentId(null);
@@ -4212,7 +4245,19 @@ export default function DashboardPage() {
     setSessionWordFileName("");
     setSessionWordFileData(null);
     setSessionExamSourceId("");
+    setSessionContentWeekId(defaultWeekId != null ? String(defaultWeekId) : "");
     setShowAddSessionContentModal(true);
+    setCourseMessage("");
+  };
+
+  const onOpenCreateCourseWeekModal = (session: CourseSessionItem) => {
+    const nextOrder = (session.weeks ?? []).reduce((max, week) => Math.max(max, Number(week.weekOrder ?? 0)), 0) + 1;
+    setAddingWeekSessionId(session.id);
+    setAddingWeekSessionName(session.name);
+    setCourseWeekName("");
+    setCourseWeekDescription("");
+    setCourseWeekOrder(String(Math.max(1, nextOrder)));
+    setShowCreateCourseWeekModal(true);
     setCourseMessage("");
   };
 
@@ -4241,8 +4286,57 @@ export default function DashboardPage() {
     setSessionWordFileName(content.fileName?.trim() ?? "");
     setSessionWordFileData(null);
     setSessionExamSourceId(content.sourceExamId != null ? String(content.sourceExamId) : "");
+    setSessionContentWeekId(content.weekId != null ? String(content.weekId) : "");
     setShowAddSessionContentModal(true);
     setCourseMessage("");
+  };
+
+  const onCreateCourseWeek = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!user || addingWeekSessionId == null) {
+      return;
+    }
+
+    const currentCourseModule = parseCourseModulePayload(payload);
+    const resolvedCourseId =
+      openedCourseId != null &&
+      currentCourseModule.courses.some(
+        (course) => course.id === openedCourseId && (course.sessions ?? []).some((session) => session.id === addingWeekSessionId),
+      )
+        ? openedCourseId
+        : (currentCourseModule.courses.find((course) => (course.sessions ?? []).some((session) => session.id === addingWeekSessionId))
+            ?.id ?? null);
+
+    if (resolvedCourseId == null) {
+      setCourseFeedback("No se encontro el curso de la sesion.", "error");
+      return;
+    }
+
+    const weekName = courseWeekName.trim();
+    const weekDescription = courseWeekDescription.trim();
+    const weekOrder = Number(courseWeekOrder);
+
+    setCreatingCourseWeek(true);
+    setCourseMessage("");
+    try {
+      await postJson(`/api/v1/courses/${resolvedCourseId}/sessions/${addingWeekSessionId}/weeks`, user.token, {
+        userId: user.id,
+        name: weekName || null,
+        description: weekDescription || null,
+        weekOrder: Number.isFinite(weekOrder) && weekOrder > 0 ? weekOrder : null,
+      });
+      await refreshCourses();
+      resetCourseWeekEditor();
+      setCourseFeedback("Semana creada.", "success");
+    } catch (weekError) {
+      if (weekError instanceof Error) {
+        setCourseFeedback(weekError.message, "error");
+      } else {
+        setCourseFeedback("No se pudo crear la semana.", "error");
+      }
+    } finally {
+      setCreatingCourseWeek(false);
+    }
   };
 
   const onSaveSessionContent = async (event: FormEvent<HTMLFormElement>) => {
@@ -4277,6 +4371,10 @@ export default function DashboardPage() {
       if (!normalizedContentName) {
         setCourseFeedback("Ingresa un nombre para el contenido.", "error");
         return;
+      }
+      const selectedWeekId = Number(sessionContentWeekId);
+      if (Number.isFinite(selectedWeekId) && selectedWeekId > 0) {
+        body.weekId = selectedWeekId;
       }
 
       if (sessionContentType === "video") {
@@ -8492,10 +8590,10 @@ export default function DashboardPage() {
       groupPracticeState && groupPracticeState.currentQuestion
         ? `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`
         : null;
-    const serverReviewActive = Boolean(groupPracticeState?.reviewActive);
+    const serverRevealAnswers = Boolean(groupPracticeState?.revealAnswers);
     const phaseEndsAtMs = toMillisOrZero(groupPracticeState?.phaseEndsAtEpochMs ?? groupPracticeState?.phaseEndsAt);
 
-    if (currentQuestionKey == null || !serverReviewActive) {
+    if (currentQuestionKey == null || !serverRevealAnswers) {
       setGroupAutoAdvanceSecondsLeft(null);
       groupReviewQuestionKeyRef.current = null;
       groupReviewStartedAtMsRef.current = null;
@@ -8569,6 +8667,7 @@ export default function DashboardPage() {
     groupPracticeState?.sessionId,
     groupPracticeState?.currentQuestionIndex,
     groupPracticeState?.currentQuestion?.id,
+    groupPracticeState?.revealAnswers,
     groupPracticeState?.reviewActive,
     groupPracticeState?.reviewSecondsRemaining,
     groupPracticeState?.phaseEndsAt,
@@ -10157,6 +10256,11 @@ export default function DashboardPage() {
         return firstDate - secondDate;
       });
       const nextOpenedSessionOrder = getNextSessionOrder(openedCourseSessions);
+      const addingContentSession =
+        addingContentSessionId == null
+          ? null
+          : openedCourseSessions.find((session) => session.id === addingContentSessionId) ?? null;
+      const addingContentWeeks = addingContentSession?.weeks ?? [];
       return (
         <div className="flex w-full flex-col gap-4">
           <DataCard title="Cursos">
@@ -10478,11 +10582,32 @@ export default function DashboardPage() {
                                       {session.weeklyContent?.trim() || "Sin descripcion registrada en esta sesion."}
                                     </p>
 
+                                    {session.weeks && session.weeks.length > 0 ? (
+                                      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Semanas</p>
+                                        <div className="mt-1 flex flex-wrap gap-2">
+                                          {session.weeks.map((week) => (
+                                            <span
+                                              key={`session-week-${session.id}-${week.id}`}
+                                              className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700"
+                                            >
+                                              {(week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim()}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                    ) : null}
+
                                     <div className="space-y-2">
                                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Contenidos guardados</p>
-                                      {session.contents && session.contents.length > 0 ? (
+                                      {(() => {
+                                        const sessionContents =
+                                          session.contents && session.contents.length > 0
+                                            ? session.contents
+                                            : (session.weeks ?? []).flatMap((week) => week.contents ?? []);
+                                        return sessionContents.length > 0 ? (
                                         <div className="space-y-2">
-                                          {session.contents.map((content) => {
+                                          {sessionContents.map((content) => {
                                             const contentType = (content.type ?? "").toLowerCase();
                                             const typeLabel =
                                               contentType === "video"
@@ -10505,6 +10630,11 @@ export default function DashboardPage() {
                                                   <p className="font-semibold text-slate-800">
                                                     {content.title?.trim() || "Sin nombre"} - {typeLabel}
                                                   </p>
+                                                  {content.weekName?.trim() ? (
+                                                    <p className="text-[11px] font-semibold text-indigo-700">
+                                                      {content.weekName}
+                                                    </p>
+                                                  ) : null}
                                                   {content.externalLink?.trim() ? (
                                                     <div className="mt-0.5 flex flex-wrap items-center gap-2">
                                                       <button
@@ -10632,11 +10762,19 @@ export default function DashboardPage() {
                                         </div>
                                       ) : (
                                         <p className="text-xs text-slate-500">No hay contenidos guardados aun.</p>
-                                      )}
+                                      );
+                                    })()}
                                     </div>
 
                                     {openedCourseIsOwner ? (
-                                      <div className="flex justify-end">
+                                      <div className="flex justify-end gap-2">
+                                        <button
+                                          type="button"
+                                          onClick={() => onOpenCreateCourseWeekModal(session)}
+                                          className="rounded-lg border border-blue-300 bg-white px-3 py-2 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                                        >
+                                          Anadir semana
+                                        </button>
                                         <button
                                           type="button"
                                           onClick={() => onOpenAddSessionContentModal(session)}
@@ -11345,6 +11483,19 @@ export default function DashboardPage() {
                   <option value="portada">Imagen de portada</option>
                 </select>
 
+                <select
+                  value={sessionContentWeekId}
+                  onChange={(event) => setSessionContentWeekId(event.target.value)}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                >
+                  <option value="">Semana por defecto</option>
+                  {addingContentWeeks.map((week) => (
+                    <option key={week.id} value={String(week.id)}>
+                      {(week.name?.trim() || `Semana ${week.weekOrder ?? 1}`).trim()}
+                    </option>
+                  ))}
+                </select>
+
                 <input
                   value={sessionContentName}
                   onChange={(event) => setSessionContentName(event.target.value)}
@@ -11661,6 +11812,51 @@ export default function DashboardPage() {
                     className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
                   >
                     {savingCourseId === editingCourseId ? "Guardando..." : "Guardar cambios"}
+                  </button>
+                </div>
+              </form>
+            </ModalShell>
+          ) : null}
+
+          {showCreateCourseWeekModal && addingWeekSessionId != null ? (
+            <ModalShell
+              title={`Crear semana: ${addingWeekSessionName || "Sesion"}`}
+              onClose={resetCourseWeekEditor}
+            >
+              <form onSubmit={onCreateCourseWeek} className="space-y-3">
+                <input
+                  value={courseWeekName}
+                  onChange={(event) => setCourseWeekName(event.target.value)}
+                  placeholder="Nombre de la semana (ej. SEMANA 2: Practica)"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                />
+                <input
+                  value={courseWeekOrder}
+                  onChange={(event) => setCourseWeekOrder(event.target.value)}
+                  placeholder="Orden de semana"
+                  inputMode="numeric"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                />
+                <textarea
+                  value={courseWeekDescription}
+                  onChange={(event) => setCourseWeekDescription(event.target.value)}
+                  placeholder="Descripcion de la semana"
+                  className="min-h-24 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={resetCourseWeekEditor}
+                    className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingCourseWeek}
+                    className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
+                  >
+                    {creatingCourseWeek ? "Creando..." : "Crear semana"}
                   </button>
                 </div>
               </form>
@@ -12307,10 +12503,10 @@ export default function DashboardPage() {
           });
         const isCurrentRuntimeQuestion =
           currentGroupQuestionKey != null && groupQuestionRuntimeKeyRef.current === currentGroupQuestionKey;
-        const serverReviewActive = Boolean(groupPracticeState.reviewActive);
+        const serverRevealAnswers = Boolean(groupPracticeState.revealAnswers);
         const isReviewWindow =
           isCurrentRuntimeQuestion &&
-          serverReviewActive &&
+          serverRevealAnswers &&
           groupAutoAdvanceSecondsLeft != null &&
           groupAutoAdvanceSecondsLeft > 0 &&
           currentGroupQuestionKey != null &&
