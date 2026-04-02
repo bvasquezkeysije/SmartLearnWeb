@@ -4834,12 +4834,13 @@ export default function DashboardPage() {
     }
 
     const fileData = content.fileData?.trim() ?? "";
-    if (!fileData) {
-      setCourseFeedback("No hay archivo disponible para vista previa.", "error");
+    const externalLink = content.externalLink?.trim() ?? "";
+    if (!fileData && !externalLink) {
+      setCourseFeedback("No hay archivo o enlace disponible para vista previa.", "error");
       return;
     }
     const objectUrl = fileData.startsWith("data:") ? dataUrlToObjectUrl(fileData) : null;
-    const previewUrl = objectUrl ?? fileData;
+    const previewUrl = (objectUrl ?? fileData) || externalLink;
     if (!previewUrl) {
       setCourseFeedback("No se pudo generar la vista previa del archivo.", "error");
       return;
@@ -10985,14 +10986,15 @@ export default function DashboardPage() {
                                                                 : "Contenido";
                                                     const hasExternalLink = Boolean(content.externalLink?.trim());
                                                     const hasFileData = Boolean(content.fileData?.trim());
+                                                    const isDocumentContent = contentType === "pdf" || contentType === "word";
                                                     const canPreviewInline =
                                                       (contentType === "video" && hasExternalLink) ||
-                                                      ((contentType === "pdf" || contentType === "word") && hasFileData);
+                                                      (isDocumentContent && (hasFileData || hasExternalLink));
                                                     const openUrl = hasExternalLink
                                                       ? (content.externalLink?.trim() ?? "")
                                                       : (hasFileData ? (content.fileData?.trim() ?? "") : "");
-                                                    const canDownloadDocument =
-                                                      (contentType === "pdf" || contentType === "word") && hasFileData;
+                                                    const canOpenOutside = Boolean(openUrl);
+                                                    const canDownloadDocument = isDocumentContent && hasFileData;
                                                     return (
                                                       <div
                                                         key={`week-content-${week.id}-${content.id}`}
@@ -11076,16 +11078,15 @@ export default function DashboardPage() {
                                                           </div>
                                                         ) : (
                                                           <div className="mt-2 flex flex-wrap items-center gap-2">
-                                                            {canPreviewInline ? (
-                                                              <button
-                                                                type="button"
-                                                                onClick={() => onOpenCourseContentPreview(content)}
-                                                                className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                                                              >
-                                                                Ver
-                                                              </button>
-                                                            ) : null}
-                                                            {openUrl ? (
+                                                            <button
+                                                              type="button"
+                                                              onClick={() => onOpenCourseContentPreview(content)}
+                                                              disabled={!canPreviewInline}
+                                                              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            >
+                                                              Ver
+                                                            </button>
+                                                            {canOpenOutside ? (
                                                               <a
                                                                 href={openUrl}
                                                                 target="_blank"
@@ -11094,15 +11095,33 @@ export default function DashboardPage() {
                                                               >
                                                                 Abrir
                                                               </a>
-                                                            ) : null}
-                                                            {canDownloadDocument ? (
-                                                              <a
-                                                                href={content.fileData?.trim() ?? ""}
-                                                                download={content.fileName?.trim() || `${content.title?.trim() || "documento"}.${contentType === "pdf" ? "pdf" : "docx"}`}
-                                                                className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                                                            ) : (
+                                                              <button
+                                                                type="button"
+                                                                disabled
+                                                                className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 opacity-50"
                                                               >
-                                                                Descargar
-                                                              </a>
+                                                                Abrir
+                                                              </button>
+                                                            )}
+                                                            {isDocumentContent ? (
+                                                              canDownloadDocument ? (
+                                                                <a
+                                                                  href={content.fileData?.trim() ?? ""}
+                                                                  download={content.fileName?.trim() || `${content.title?.trim() || "documento"}.${contentType === "pdf" ? "pdf" : "docx"}`}
+                                                                  className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:bg-emerald-100"
+                                                                >
+                                                                  Descargar
+                                                                </a>
+                                                              ) : (
+                                                                <button
+                                                                  type="button"
+                                                                  disabled
+                                                                  className="rounded-md border border-emerald-300 bg-emerald-50 px-2 py-1 text-[11px] font-semibold text-emerald-700 opacity-50"
+                                                                >
+                                                                  Descargar
+                                                                </button>
+                                                              )
                                                             ) : null}
                                                           </div>
                                                         )}
