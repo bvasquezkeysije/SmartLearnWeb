@@ -6857,7 +6857,12 @@ export default function DashboardPage() {
           }
         }
         if (missingCatalogIds.length > 0) {
-          const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+          const exams = await Promise.all(
+            missingCatalogIds.map(
+              (examId) =>
+                fetchJson(`/api/v1/ia/exams/${examId}/summary?userId=${user.id}`, user.token) as Promise<ExamSummary>,
+            ),
+          );
           if (!cancelled) {
             setCourseExamCatalogById((previous) => {
               const next = { ...previous };
@@ -7032,17 +7037,6 @@ export default function DashboardPage() {
                 : Boolean(anchoredExamVisibilityById[item.id])
                   ? "Ocultar de Examenes"
                   : "Visualizar en Examenes"}
-            </button>
-          ) : null}
-          {fromCourseContent ? (
-            <button
-              type="button"
-              onClick={() =>
-                void onStartPracticeFromCourseSessionContent(options!.contentContext!.sessionId, options!.contentContext!.content)
-              }
-              className="rounded-lg border border-blue-300 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-            >
-              Iniciar repaso
             </button>
           ) : null}
         </div>
