@@ -4854,6 +4854,47 @@ export default function DashboardPage() {
     setCourseContentPreviewOpen(true);
   };
 
+  const onOpenCourseContentOutside = (content: CourseSessionContentItem) => {
+    const externalLink = content.externalLink?.trim() ?? "";
+    const fileData = content.fileData?.trim() ?? "";
+    if (!externalLink && !fileData) {
+      setCourseFeedback("No hay enlace o archivo disponible para abrir.", "error");
+      return;
+    }
+
+    let targetUrl = externalLink || fileData;
+    let objectUrlToRevoke: string | null = null;
+    if (!externalLink && fileData.startsWith("data:")) {
+      const objectUrl = dataUrlToObjectUrl(fileData);
+      if (objectUrl) {
+        targetUrl = objectUrl;
+        objectUrlToRevoke = objectUrl;
+      }
+    }
+
+    const newWindow = window.open("about:blank", "_blank");
+    if (!newWindow) {
+      setCourseFeedback("El navegador bloqueo la nueva pestana. Habilita popups para este sitio.", "error");
+      if (objectUrlToRevoke) {
+        URL.revokeObjectURL(objectUrlToRevoke);
+      }
+      return;
+    }
+
+    try {
+      newWindow.opener = null;
+    } catch {
+      // algunos navegadores restringen opener
+    }
+    newWindow.location.replace(targetUrl);
+
+    if (objectUrlToRevoke) {
+      window.setTimeout(() => {
+        URL.revokeObjectURL(objectUrlToRevoke!);
+      }, 60_000);
+    }
+  };
+
   const onAddCourseParticipant = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!user || openedCourseId == null) {
@@ -11087,14 +11128,13 @@ export default function DashboardPage() {
                                                               Ver
                                                             </button>
                                                             {canOpenOutside ? (
-                                                              <a
-                                                                href={openUrl}
-                                                                target="_blank"
-                                                                rel="noreferrer"
+                                                              <button
+                                                                type="button"
+                                                                onClick={() => onOpenCourseContentOutside(content)}
                                                                 className="rounded-md border border-blue-300 bg-blue-50 px-2 py-1 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
                                                               >
                                                                 Abrir
-                                                              </a>
+                                                              </button>
                                                             ) : (
                                                               <button
                                                                 type="button"
