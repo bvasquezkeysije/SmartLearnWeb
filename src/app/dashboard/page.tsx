@@ -157,6 +157,10 @@ type ExamGroupState = {
   firstAnswerElapsedSeconds?: number | null;
   questionStartedAt?: string | null;
   questionStartedAtEpochMs?: number | null;
+  phase?: "open" | "review" | string | null;
+  phaseStartedAt?: string | null;
+  phaseEndsAt?: string | null;
+  questionVersion?: number | null;
   reviewActive?: boolean | null;
   reviewSecondsRemaining?: number | null;
   startedAt?: unknown;
@@ -7636,6 +7640,7 @@ export default function DashboardPage() {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
         questionId: currentQuestion.id,
+        questionVersion: groupPracticeState.questionVersion ?? null,
         selectedOption: currentQuestion.questionType === "multiple_choice" ? selectedOptionForCurrentQuestion : null,
         writtenAnswer:
           currentQuestion.questionType === "multiple_choice" ? null : writtenAnswerForCurrentQuestion || null,
