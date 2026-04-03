@@ -7103,7 +7103,7 @@ export default function DashboardPage() {
               {canRenameExam ? (
                 <button
                   type="button"
-                  onClick={() => void onRenameExamName(item)}
+                  onClick={() => void onRenameExamName(item, actionOrigin)}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
                   aria-label="Editar nombre del examen"
                   title="Editar nombre del examen"
@@ -7258,7 +7258,7 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={() => {
-                ensureExamActionSurface();
+                ensureExamInteractiveSurface(actionOrigin);
                 setSelectedExam(item);
                 setShowDeactivateModal(true);
               }}
@@ -7452,10 +7452,8 @@ export default function DashboardPage() {
   const ensureExamInteractiveSurface = (
     originSection: "ia" | "cursos" | "examenes" = "examenes",
   ) => {
-    // Nota: mientras los modales/runners del examen viven en el layout de "examenes",
-    // en contexto de cursos forzamos esa superficie para garantizar funcionamiento.
-    if (originSection === "cursos" && active !== "examenes") {
-      setActive("examenes");
+    // En cursos, los modales deben abrir sin forzar cambio de modulo.
+    if (originSection === "cursos") {
       return;
     }
     ensureExamActionSurface();
@@ -7470,8 +7468,11 @@ export default function DashboardPage() {
     setShowManageModal(true);
   };
 
-  const onRenameExamName = (exam: ExamSummary) => {
-    ensureExamActionSurface();
+  const onRenameExamName = (
+    exam: ExamSummary,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
+    ensureExamInteractiveSurface(originSection);
     setRenameExamTarget(exam);
     setRenameExamNameDraft((exam.name ?? "").trim());
     setShowRenameExamModal(true);
@@ -18909,6 +18910,563 @@ export default function DashboardPage() {
                 </div>
               </div>
             </ModalShell>
+          ) : null}
+
+          {active !== "examenes" ? (
+            <>
+              {showManageModal && selectedExam ? (
+                <ModalShell
+                  title={`Gestionar preguntas: ${selectedExam.name}`}
+                  onClose={() => setShowManageModal(false)}
+                  panelClassName="w-full max-w-6xl max-h-[92vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-2xl sm:p-4"
+                >
+                  <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
+                    <form onSubmit={onSaveManualQuestion} className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                      <h4 className="text-sm font-semibold text-slate-800">
+                        {editingQuestionId == null ? "Crear pregunta manual" : `Editar pregunta #${editingQuestionId}`}
+                      </h4>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Pregunta</label>
+                        <textarea
+                          value={manualQuestionForm.questionText}
+                          onChange={(event) =>
+                            setManualQuestionForm((prev) => ({ ...prev, questionText: event.target.value }))
+                          }
+                          className="min-h-20 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                          placeholder="Escribe la pregunta..."
+                          required
+                        />
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-slate-600">Tipo</label>
+                          <select
+                            value={manualQuestionForm.questionType}
+                            onChange={(event) =>
+                              setManualQuestionForm((prev) => ({
+                                ...prev,
+                                questionType: event.target.value as "multiple_choice" | "written",
+                              }))
+                            }
+                            className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                          >
+                            <option value="multiple_choice">Seleccion multiple</option>
+                            <option value="written">Escrita</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-slate-600">Puntaje</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={1000}
+                            value={manualQuestionForm.points}
+                            onChange={(event) => setManualQuestionForm((prev) => ({ ...prev, points: event.target.value }))}
+                            className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                            required
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2 sm:items-end xl:grid-cols-3">
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-slate-600">Temporizador (segundos)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={86400}
+                            value={manualQuestionForm.temporizadorSegundos}
+                            onChange={(event) =>
+                              setManualQuestionForm((prev) => ({ ...prev, temporizadorSegundos: event.target.value }))
+                            }
+                            className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-slate-600">Tiempo revision (segundos)</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={3600}
+                            value={manualQuestionForm.reviewSeconds}
+                            onChange={(event) =>
+                              setManualQuestionForm((prev) => ({ ...prev, reviewSeconds: event.target.value }))
+                            }
+                            className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                            required
+                          />
+                        </div>
+                        <label className="grid min-h-[42px] grid-cols-[auto,1fr] items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm leading-tight text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={manualQuestionForm.timerEnabled}
+                            onChange={(event) =>
+                              setManualQuestionForm((prev) => ({ ...prev, timerEnabled: event.target.checked }))
+                            }
+                            className="shrink-0"
+                          />
+                          <span className="min-w-0 break-words">Activar temporizador</span>
+                        </label>
+                      </div>
+                      <p className="-mt-1 text-[11px] text-slate-500">Tiempo revision solo se usa en repaso grupal.</p>
+
+                      {manualQuestionForm.questionType === "multiple_choice" ? (
+                        <div className="space-y-2">
+                          <div className="grid gap-2 sm:grid-cols-2">
+                            <input
+                              value={manualQuestionForm.optionA}
+                              onChange={(event) => setManualQuestionForm((prev) => ({ ...prev, optionA: event.target.value }))}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                              placeholder="Opcion A"
+                              required
+                            />
+                            <input
+                              value={manualQuestionForm.optionB}
+                              onChange={(event) => setManualQuestionForm((prev) => ({ ...prev, optionB: event.target.value }))}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                              placeholder="Opcion B"
+                              required
+                            />
+                            <input
+                              value={manualQuestionForm.optionC}
+                              onChange={(event) => setManualQuestionForm((prev) => ({ ...prev, optionC: event.target.value }))}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                              placeholder="Opcion C"
+                            />
+                            <input
+                              value={manualQuestionForm.optionD}
+                              onChange={(event) => setManualQuestionForm((prev) => ({ ...prev, optionD: event.target.value }))}
+                              className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                              placeholder="Opcion D"
+                            />
+                          </div>
+                          <div>
+                            <label className="mb-1 block text-xs font-semibold text-slate-600">Opcion correcta</label>
+                            <select
+                              value={manualQuestionForm.correctOption}
+                              onChange={(event) =>
+                                setManualQuestionForm((prev) => ({
+                                  ...prev,
+                                  correctOption: event.target.value as "a" | "b" | "c" | "d",
+                                }))
+                              }
+                              className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                            >
+                              <option value="a">A</option>
+                              <option value="b">B</option>
+                              <option value="c">C</option>
+                              <option value="d">D</option>
+                            </select>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="mb-1 block text-xs font-semibold text-slate-600">Respuesta correcta</label>
+                          <input
+                            value={manualQuestionForm.correctAnswer}
+                            onChange={(event) =>
+                              setManualQuestionForm((prev) => ({ ...prev, correctAnswer: event.target.value }))
+                            }
+                            className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                            placeholder="Respuesta esperada"
+                            required
+                          />
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-slate-600">Explicacion (opcional)</label>
+                        <textarea
+                          value={manualQuestionForm.explanation}
+                          onChange={(event) =>
+                            setManualQuestionForm((prev) => ({ ...prev, explanation: event.target.value }))
+                          }
+                          className="min-h-16 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                          placeholder="Explicacion de la respuesta"
+                        />
+                      </div>
+
+                      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                        {editingQuestionId != null ? (
+                          <button
+                            type="button"
+                            onClick={onCancelManualQuestionEdit}
+                            className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                          >
+                            Cancelar edicion
+                          </button>
+                        ) : null}
+                        <button
+                          type="submit"
+                          disabled={savingManualQuestion}
+                          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-70"
+                        >
+                          {savingManualQuestion
+                            ? editingQuestionId != null
+                              ? "Actualizando..."
+                              : "Guardando..."
+                            : editingQuestionId != null
+                              ? "Actualizar pregunta"
+                              : "Guardar pregunta"}
+                        </button>
+                      </div>
+                    </form>
+
+                    <div className="rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                        <h4 className="text-sm font-semibold text-slate-800">Preguntas registradas</h4>
+                        <select
+                          value={manualQuestionOrder}
+                          onChange={(event) => setManualQuestionOrder(event.target.value as "newest" | "oldest")}
+                          className="rounded-md border border-slate-300 px-2 py-1 text-xs text-slate-700"
+                        >
+                          <option value="newest">Nuevas primero</option>
+                          <option value="oldest">Antiguas primero</option>
+                        </select>
+                      </div>
+
+                      {managedExamQuestions.length === 0 ? (
+                        <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                          Este examen aun no tiene preguntas.
+                        </p>
+                      ) : (
+                        <ul className="max-h-[45vh] space-y-2 overflow-auto pr-1 sm:max-h-[58vh]">
+                          {[...managedExamQuestions]
+                            .sort((a, b) =>
+                              manualQuestionOrder === "newest" ? b.id - a.id : a.id - b.id,
+                            )
+                            .map((question) => (
+                              <li key={question.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-900">
+                                      #{question.id} {question.questionText}
+                                    </p>
+                                    <p className="text-xs text-slate-600">
+                                      {questionTypeLabel(question.questionType)} | Puntaje: {question.points ?? 0} |
+                                      Temporizador: {question.temporizadorSegundos ?? 0}s | Revision: {question.reviewSeconds ?? 10}s
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => onEditManualQuestion(question)}
+                                    className="rounded-md border border-blue-400 px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+                                  >
+                                    Editar
+                                  </button>
+                                </div>
+                              </li>
+                            ))}
+                        </ul>
+                      )}
+                    </div>
+                  </div>
+                </ModalShell>
+              ) : null}
+
+              {showGroupSettingsModal && selectedExam ? (
+                <ModalShell
+                  title={`Configuracion repaso grupal: ${selectedExam.name}`}
+                  onClose={() => setShowGroupSettingsModal(false)}
+                >
+                  <div className="space-y-4">
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-slate-800">Verificacion y explicacion</p>
+                      <label className="mb-1 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="practice_feedback_mode"
+                          value="with_feedback"
+                          checked={practiceFeedbackMode === "with_feedback"}
+                          onChange={(event) => setPracticeFeedbackMode(event.target.value as PracticeFeedbackMode)}
+                        />
+                        Mostrar verificacion y explicacion en cada pregunta
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="practice_feedback_mode"
+                          value="without_feedback"
+                          checked={practiceFeedbackMode === "without_feedback"}
+                          onChange={(event) => setPracticeFeedbackMode(event.target.value as PracticeFeedbackMode)}
+                        />
+                        Avanzar directo sin verificacion inmediata
+                      </label>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-slate-800">Orden de preguntas</p>
+                      <label className="mb-1 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="practice_order_mode"
+                          value="ordered"
+                          checked={practiceOrderMode === "ordered"}
+                          onChange={(event) => setPracticeOrderMode(event.target.value as PracticeOrderMode)}
+                        />
+                        En orden
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="practice_order_mode"
+                          value="random"
+                          checked={practiceOrderMode === "random"}
+                          onChange={(event) => setPracticeOrderMode(event.target.value as PracticeOrderMode)}
+                        />
+                        Aleatorio
+                      </label>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-slate-800">Progreso</p>
+                      <label className="mb-1 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="practice_progress_mode"
+                          value="repeat_until_correct"
+                          checked={practiceProgressMode === "repeat_until_correct"}
+                          onChange={(event) => setPracticeProgressMode(event.target.value as PracticeProgressMode)}
+                        />
+                        Repetir hasta responder correctamente
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="practice_progress_mode"
+                          value="allow_incorrect_pass"
+                          checked={practiceProgressMode === "allow_incorrect_pass"}
+                          onChange={(event) => setPracticeProgressMode(event.target.value as PracticeProgressMode)}
+                        />
+                        Permitir avanzar aunque sea incorrecta
+                      </label>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-slate-800">Visibilidad del examen</p>
+                      <select
+                        value={practiceExamVisibility}
+                        onChange={(event) =>
+                          setPracticeExamVisibility(event.target.value === "public" ? "public" : "private")
+                        }
+                        disabled={(selectedExam.ownerUserId ?? 0) !== (user?.id ?? 0)}
+                        className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-[#004aad] disabled:cursor-not-allowed disabled:bg-slate-100"
+                      >
+                        <option value="private">Privado (solo por enlace/permisos)</option>
+                        <option value="public">Publico (visible en busqueda general)</option>
+                      </select>
+                      {(selectedExam.ownerUserId ?? 0) !== (user?.id ?? 0) ? (
+                        <p className="mt-1 text-xs text-slate-500">Solo el propietario puede cambiar la visibilidad.</p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowGroupSettingsModal(false)}
+                      className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onSaveGroupPracticeSettings()}
+                      disabled={savingPracticeSettings}
+                      className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-70"
+                    >
+                      {savingPracticeSettings ? "Guardando..." : "Guardar configuracion grupal"}
+                    </button>
+                  </div>
+                </ModalShell>
+              ) : null}
+
+              {showIndividualSettingsModal && selectedExam ? (
+                <ModalShell
+                  title={`Configuracion repaso individual: ${selectedExam.name}`}
+                  onClose={() => setShowIndividualSettingsModal(false)}
+                >
+                  <div className="space-y-4">
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-slate-800">Verificacion y explicacion</p>
+                      <label className="mb-1 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="individual_practice_feedback_mode"
+                          value="with_feedback"
+                          checked={practiceFeedbackMode === "with_feedback"}
+                          onChange={(event) => setPracticeFeedbackMode(event.target.value as PracticeFeedbackMode)}
+                        />
+                        Mostrar verificacion y explicacion en cada pregunta
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="individual_practice_feedback_mode"
+                          value="without_feedback"
+                          checked={practiceFeedbackMode === "without_feedback"}
+                          onChange={(event) => setPracticeFeedbackMode(event.target.value as PracticeFeedbackMode)}
+                        />
+                        Avanzar directo sin verificacion inmediata
+                      </label>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-slate-800">Orden de preguntas</p>
+                      <label className="mb-1 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="individual_practice_order_mode"
+                          value="ordered"
+                          checked={practiceOrderMode === "ordered"}
+                          onChange={(event) => setPracticeOrderMode(event.target.value as PracticeOrderMode)}
+                        />
+                        En orden
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="individual_practice_order_mode"
+                          value="random"
+                          checked={practiceOrderMode === "random"}
+                          onChange={(event) => setPracticeOrderMode(event.target.value as PracticeOrderMode)}
+                        />
+                        Aleatorio
+                      </label>
+                    </div>
+
+                    <div>
+                      <p className="mb-2 text-sm font-semibold text-slate-800">Progreso</p>
+                      <label className="mb-1 flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="individual_practice_progress_mode"
+                          value="repeat_until_correct"
+                          checked={practiceProgressMode === "repeat_until_correct"}
+                          onChange={(event) => setPracticeProgressMode(event.target.value as PracticeProgressMode)}
+                        />
+                        Repetir hasta responder correctamente
+                      </label>
+                      <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                          type="radio"
+                          name="individual_practice_progress_mode"
+                          value="allow_incorrect_pass"
+                          checked={practiceProgressMode === "allow_incorrect_pass"}
+                          onChange={(event) => setPracticeProgressMode(event.target.value as PracticeProgressMode)}
+                        />
+                        Permitir avanzar aunque sea incorrecta
+                      </label>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowIndividualSettingsModal(false)}
+                      className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onSaveIndividualPracticeSettings()}
+                      disabled={savingPracticeSettings}
+                      className="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-700 disabled:opacity-70"
+                    >
+                      {savingPracticeSettings ? "Guardando..." : "Guardar configuracion individual"}
+                    </button>
+                  </div>
+                </ModalShell>
+              ) : null}
+
+              {showRenameExamModal && renameExamTarget ? (
+                <ModalShell
+                  title="Editar nombre del examen"
+                  onClose={() => {
+                    if (renamingExam) {
+                      return;
+                    }
+                    setShowRenameExamModal(false);
+                    setRenameExamTarget(null);
+                  }}
+                >
+                  <form
+                    className="space-y-4"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void onSaveRenameExamName();
+                    }}
+                  >
+                    <div>
+                      <p className="text-sm text-slate-700">Actualiza el nombre para identificar mejor este examen.</p>
+                      <label htmlFor="rename-exam-name-course-context" className="mt-3 block text-sm font-semibold text-slate-700">
+                        Nombre del examen
+                      </label>
+                      <input
+                        id="rename-exam-name-course-context"
+                        type="text"
+                        value={renameExamNameDraft}
+                        onChange={(event) => setRenameExamNameDraft(event.target.value)}
+                        className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+                        maxLength={160}
+                        autoFocus
+                        disabled={renamingExam}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (renamingExam) {
+                            return;
+                          }
+                          setShowRenameExamModal(false);
+                          setRenameExamTarget(null);
+                        }}
+                        className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={renamingExam}
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        className="rounded-lg bg-[#004aad] px-4 py-2 text-sm font-semibold text-white hover:bg-[#003b88] disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={renamingExam}
+                      >
+                        {renamingExam ? "Guardando..." : "Guardar"}
+                      </button>
+                    </div>
+                  </form>
+                </ModalShell>
+              ) : null}
+
+              {showDeactivateModal && selectedExam ? (
+                <ModalShell title="Confirmar inactivacion" onClose={() => setShowDeactivateModal(false)}>
+                  <p className="text-sm text-slate-700">
+                    Vas a inactivar el examen <span className="font-semibold">{selectedExam.name}</span>. Esta accion lo
+                    sacara de la lista activa.
+                  </p>
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowDeactivateModal(false)}
+                      className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void onInactivateExam(selectedExam)}
+                      className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700"
+                    >
+                      Inactivar
+                    </button>
+                  </div>
+                </ModalShell>
+              ) : null}
+            </>
           ) : null}
 
           {shareTarget ? (
