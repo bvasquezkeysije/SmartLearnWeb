@@ -295,7 +295,24 @@ const mergeGroupState = (previous: ExamGroupState | null, incoming: ExamGroupSta
 type CourseExamItem = {
   id: number;
   name: string;
+  code?: string | null;
   questionsCount?: number | null;
+  ownerUserId?: number | null;
+  visibility?: "public" | "private" | string | null;
+  accessRole?: "owner" | "editor" | "viewer" | string | null;
+  canEditQuestions?: boolean | null;
+  canEditSettings?: boolean | null;
+  canShare?: boolean | null;
+  canStartGroup?: boolean | null;
+  canRenameExam?: boolean | null;
+  participantsCount?: number | null;
+  personalPracticeCount?: number | null;
+  groupPracticeCount?: number | null;
+  attemptsCount?: number | null;
+  groupPracticeSessionId?: number | null;
+  groupPracticeStatus?: "waiting" | "active" | "finished" | string | null;
+  groupPracticeCreatedByUserId?: number | null;
+  createdAt?: unknown;
 };
 
 type CourseParticipantItem = {
@@ -354,6 +371,31 @@ function resolveSourceExamId(value: unknown): number | null {
   return parsed;
 }
 
+function toExamSummaryFromCourseExam(item: CourseExamItem): ExamSummary {
+  return {
+    id: item.id,
+    name: item.name,
+    code: item.code ?? null,
+    questionsCount: item.questionsCount ?? null,
+    ownerUserId: item.ownerUserId ?? null,
+    visibility: item.visibility ?? null,
+    accessRole: item.accessRole ?? null,
+    canEditQuestions: item.canEditQuestions ?? null,
+    canEditSettings: item.canEditSettings ?? null,
+    canShare: item.canShare ?? null,
+    canStartGroup: item.canStartGroup ?? null,
+    canRenameExam: item.canRenameExam ?? null,
+    participantsCount: item.participantsCount ?? null,
+    personalPracticeCount: item.personalPracticeCount ?? null,
+    groupPracticeCount: item.groupPracticeCount ?? null,
+    attemptsCount: item.attemptsCount ?? null,
+    groupPracticeSessionId: item.groupPracticeSessionId ?? null,
+    groupPracticeStatus: item.groupPracticeStatus ?? null,
+    groupPracticeCreatedByUserId: item.groupPracticeCreatedByUserId ?? null,
+    createdAt: item.createdAt,
+  };
+}
+
 type CourseWeekItem = {
   id: number;
   weekOrder?: number | null;
@@ -361,11 +403,6 @@ type CourseWeekItem = {
   description?: string | null;
   contents?: CourseSessionContentItem[];
   createdAt?: unknown;
-};
-
-type CourseSessionContentPracticeStartResponse = {
-  examId: number;
-  examName: string;
 };
 
 type ExamListVisibilityResponse = {
@@ -406,6 +443,25 @@ type CourseModulePayload = {
   courses: CourseItem[];
   availableExams: CourseExamItem[];
 };
+
+function isExamSummaryPayload(value: unknown): value is ExamSummary {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record.id !== "number" || typeof record.name !== "string") {
+    return false;
+  }
+  // Evita confundir lista de cursos (tambien tienen id/name) con lista de examenes.
+  if ("sessions" in record || "competencies" in record || "grades" in record) {
+    return false;
+  }
+  return true;
+}
+
+function isExamSummaryArrayPayload(value: unknown): value is ExamSummary[] {
+  return Array.isArray(value) && value.every((item) => isExamSummaryPayload(item));
+}
 
 function countCourseExams(course: CourseItem): number {
   const examIds = new Set<number>();
@@ -1613,15 +1669,45 @@ function isCoursePayload(value: unknown): value is CourseItem {
 }
 
 function parseCourseModulePayload(value: unknown): CourseModulePayload {
+  if (Array.isArray(value)) {
+    // Compatibilidad robusta: algunos despliegues/devuelven lista plana de cursos.
+    const courses = value.filter((item) => isCoursePayload(item));
+    return { courses, availableExams: [] };
+  }
   if (!value || typeof value !== "object") {
     return { courses: [], availableExams: [] };
   }
   const record = value as Record<string, unknown>;
-  const courses = Array.isArray(record.courses) ? record.courses.filter((item) => isCoursePayload(item)) : [];
+  const nestedData =
+    record.data && typeof record.data === "object" ? (record.data as Record<string, unknown>) : null;
+  const rawCourses = Array.isArray(record.courses)
+    ? record.courses
+    : nestedData && Array.isArray(nestedData.courses)
+      ? nestedData.courses
+      : [];
+  const courses = rawCourses.filter((item) => isCoursePayload(item));
   const availableExams = Array.isArray(record.availableExams)
     ? record.availableExams.filter((item) => isCourseExamItemPayload(item))
+    : nestedData && Array.isArray(nestedData.availableExams)
+      ? nestedData.availableExams.filter((item) => isCourseExamItemPayload(item))
     : [];
   return { courses, availableExams };
+}
+
+function isCourseModulePayloadShape(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  if (Array.isArray(record.courses) || Array.isArray(record.availableExams)) {
+    return true;
+  }
+  const nestedData = record.data;
+  if (!nestedData || typeof nestedData !== "object" || Array.isArray(nestedData)) {
+    return false;
+  }
+  const nestedRecord = nestedData as Record<string, unknown>;
+  return Array.isArray(nestedRecord.courses) || Array.isArray(nestedRecord.availableExams);
 }
 
 function isSalaParticipantPayload(value: unknown): value is SalaParticipant {
@@ -1976,6 +2062,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [payload, setPayload] = useState<unknown>(null);
+  const [lastCoursesPayload, setLastCoursesPayload] = useState<unknown>(null);
   const [userSearch, setUserSearch] = useState("");
   const [userPerPage, setUserPerPage] = useState("10");
   const [userStatusFilter, setUserStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -2239,6 +2326,33 @@ export default function DashboardPage() {
   const [practiceChronoSeconds, setPracticeChronoSeconds] = useState(0);
   const [practiceRemainingSeconds, setPracticeRemainingSeconds] = useState<number | null>(null);
   const [practiceOriginSection, setPracticeOriginSection] = useState<"ia" | "examenes" | "cursos">("examenes");
+  const [practiceOriginCourseId, setPracticeOriginCourseId] = useState<number | null>(null);
+  const [practiceOriginSessionId, setPracticeOriginSessionId] = useState<number | null>(null);
+  const [activeExamContentContext, setActiveExamContentContext] = useState<{
+    courseId: number;
+    sessionId: number;
+    contentId: number;
+  } | null>(null);
+  const [renameExamContentContext, setRenameExamContentContext] = useState<{
+    courseId: number;
+    sessionId: number;
+    contentId: number;
+  } | null>(null);
+  const [deactivateExamContentContext, setDeactivateExamContentContext] = useState<{
+    courseId: number;
+    sessionId: number;
+    contentId: number;
+  } | null>(null);
+  const [manageExamContentContext, setManageExamContentContext] = useState<{
+    courseId: number;
+    sessionId: number;
+    contentId: number;
+  } | null>(null);
+  const [practiceSettingsContentContext, setPracticeSettingsContentContext] = useState<{
+    courseId: number;
+    sessionId: number;
+    contentId: number;
+  } | null>(null);
   const [salasData, setSalasData] = useState<SalaItem[]>([]);
   const [selectedSalaId, setSelectedSalaId] = useState<number | null>(null);
   const [salasParticipantsOpen, setSalasParticipantsOpen] = useState(false);
@@ -2314,6 +2428,11 @@ export default function DashboardPage() {
     resourceType: ShareResourceType;
     resourceId: number;
     resourceName: string;
+    examContentContext?: {
+      courseId: number;
+      sessionId: number;
+      contentId: number;
+    };
   } | null>(null);
   const [creatingShareLink, setCreatingShareLink] = useState(false);
   const [publicShareLink, setPublicShareLink] = useState("");
@@ -2327,6 +2446,11 @@ export default function DashboardPage() {
   const [shareExamCanShare, setShareExamCanShare] = useState(false);
   const [showExamParticipantsModal, setShowExamParticipantsModal] = useState(false);
   const [examParticipantsTarget, setExamParticipantsTarget] = useState<ExamSummary | null>(null);
+  const [examParticipantsContentContext, setExamParticipantsContentContext] = useState<{
+    courseId: number;
+    sessionId: number;
+    contentId: number;
+  } | null>(null);
   const [homeShareNotifications, setHomeShareNotifications] = useState<ShareNotificationItem[]>([]);
   const [homeShareNotificationsLoading, setHomeShareNotificationsLoading] = useState(false);
   const [notificationPanelOpen, setNotificationPanelOpen] = useState(false);
@@ -3904,8 +4028,52 @@ export default function DashboardPage() {
       return;
     }
     const courses = await fetchJson(`/api/v1/courses?userId=${user.id}`, user.token);
+    setLastCoursesPayload(courses);
     setPayload(courses);
   };
+
+  const refreshCoursesPreserveView = async (
+    courseId?: number | null,
+    sessionId?: number | null,
+  ) => {
+    if (courseId != null) {
+      setOpenedCourseId(courseId);
+    }
+    if (sessionId != null) {
+      setExpandedSessionId(sessionId);
+    }
+    await refreshCourses();
+    if (courseId != null) {
+      setOpenedCourseId(courseId);
+    }
+    if (sessionId != null) {
+      setExpandedSessionId(sessionId);
+    }
+  };
+
+  useEffect(() => {
+    if (!isCourseModulePayloadShape(payload)) {
+      return;
+    }
+    setLastCoursesPayload(payload);
+  }, [payload]);
+
+  useEffect(() => {
+    if (active !== "cursos") {
+      return;
+    }
+    if (isCourseModulePayloadShape(payload)) {
+      return;
+    }
+    if (lastCoursesPayload != null) {
+      setPayload(lastCoursesPayload);
+      return;
+    }
+    if (!user) {
+      return;
+    }
+    void refreshCourses();
+  }, [active, payload, lastCoursesPayload, user]);
 
   const onCreateCourse = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -4121,7 +4289,7 @@ export default function DashboardPage() {
         priority: managingCoursePriority,
         sortOrder: Math.trunc(parsedSortOrder),
       });
-      await refreshCourses();
+      await refreshCoursesPreserveView(course.id, expandedSessionId);
       setCourseFeedback("Prioridad y orden del curso actualizados.", "success");
       setShowManageCourseModal(false);
       setManagingCourseId(null);
@@ -4166,7 +4334,7 @@ export default function DashboardPage() {
       setCourseSessionName("");
       setCourseSessionWeeklyContent("");
       setShowCreateCourseSessionModal(false);
-      await refreshCourses();
+      await refreshCoursesPreserveView(openedCourseId, expandedSessionId);
       setCourseFeedback("Sesion creada correctamente.", "success");
     } catch (courseSessionError) {
       if (courseSessionError instanceof Error) {
@@ -4256,7 +4424,7 @@ export default function DashboardPage() {
       if (openedCourseId == null || openedCourseId !== resolvedCourseId) {
         setOpenedCourseId(resolvedCourseId);
       }
-      await refreshCourses();
+      await refreshCoursesPreserveView(resolvedCourseId, editingCourseSessionId);
       setCourseFeedback("Sesion actualizada.", "success");
     } catch (courseSessionUpdateError) {
       if (courseSessionUpdateError instanceof Error) {
@@ -4313,7 +4481,7 @@ export default function DashboardPage() {
       if (openedCourseId == null || openedCourseId !== resolvedCourseId) {
         setOpenedCourseId(resolvedCourseId);
       }
-      await refreshCourses();
+      await refreshCoursesPreserveView(resolvedCourseId, null);
       setCourseFeedback("Sesion eliminada correctamente.", "success");
     } catch (deleteSessionError) {
       if (deleteSessionError instanceof Error) {
@@ -4492,7 +4660,7 @@ export default function DashboardPage() {
           body,
         );
       }
-      await refreshCourses();
+      await refreshCoursesPreserveView(resolvedCourseId, addingWeekSessionId);
       resetCourseWeekEditor();
       setCourseFeedback(editingCourseWeekId == null ? "Semana creada." : "Semana actualizada.", "success");
     } catch (weekError) {
@@ -4528,7 +4696,7 @@ export default function DashboardPage() {
         `/api/v1/courses/${resolvedCourseId}/sessions/${session.id}/weeks/${week.id}?userId=${user.id}`,
         user.token,
       );
-      await refreshCourses();
+      await refreshCoursesPreserveView(resolvedCourseId, session.id);
       setCourseFeedback("Semana eliminada.", "success");
     } catch (weekError) {
       if (weekError instanceof Error) {
@@ -4662,7 +4830,7 @@ export default function DashboardPage() {
       if (openedCourseId == null || openedCourseId !== resolvedCourseId) {
         setOpenedCourseId(resolvedCourseId);
       }
-      await refreshCourses();
+      await refreshCoursesPreserveView(resolvedCourseId, addingContentSessionId);
       resetSessionContentEditor();
       setCourseFeedback(editingSessionContentId == null ? "Contenido agregado." : "Contenido actualizado.", "success");
     } catch (sessionContentError) {
@@ -4713,7 +4881,7 @@ export default function DashboardPage() {
       if (openedCourseId == null || openedCourseId !== resolvedCourseId) {
         setOpenedCourseId(resolvedCourseId);
       }
-      await refreshCourses();
+      await refreshCoursesPreserveView(resolvedCourseId, session.id);
       setCourseFeedback("Contenido eliminado correctamente.", "success");
     } catch (deleteContentError) {
       if (deleteContentError instanceof Error) {
@@ -4771,7 +4939,7 @@ export default function DashboardPage() {
         user.token,
         { userId: user.id, orderedContentIds },
       );
-      await refreshCourses();
+      await refreshCoursesPreserveView(resolvedCourseId, session.id);
       setCourseFeedback("Orden de contenidos actualizado.", "success");
     } catch (reorderError) {
       if (reorderError instanceof Error) {
@@ -4807,19 +4975,22 @@ export default function DashboardPage() {
       return;
     }
 
-    setPracticeOriginSection("cursos");
+    rememberExamActionContext("cursos", { courseId: resolvedCourseId, sessionId, contentId: content.id });
     setPracticeIntent("start");
 
     try {
-      const startResponse = (await postJson(
-        `/api/v1/courses/${resolvedCourseId}/sessions/${sessionId}/contents/${content.id}/practice/start`,
+      const summary = (await fetchJson(
+        `/api/v1/courses/${resolvedCourseId}/sessions/${sessionId}/contents/${content.id}/exam-summary?userId=${user.id}`,
         user.token,
-        { userId: user.id },
-      )) as CourseSessionContentPracticeStartResponse;
-      const originUrl = `/dashboard?section=cursos&courseId=${resolvedCourseId}&courseTab=curso`;
-      router.push(
-        `/dashboard/examenes/repaso/${startResponse.examId}?origin=cursos&courseId=${resolvedCourseId}&originUrl=${encodeURIComponent(originUrl)}`,
-      );
+      )) as ExamSummary;
+      if (!summary || typeof summary.id !== "number") {
+        throw new Error("No se pudo resolver el examen anclado.");
+      }
+      await onStartPractice(summary, false, "cursos", {
+        courseId: resolvedCourseId,
+        sessionId,
+        contentId: content.id,
+      });
     } catch (startError) {
       if (startError instanceof Error) {
         setExamFeedback(startError.message, "error");
@@ -4849,7 +5020,7 @@ export default function DashboardPage() {
         visible: targetVisible,
       });
       setAnchoredExamVisibilityById((previous) => ({ ...previous, [examId]: targetVisible }));
-      await refreshExams();
+      await refreshExams({ preserveCurrentPayload: true });
       setCourseFeedback(
         targetVisible
           ? "El examen anclado ahora se muestra en tu lista de examenes."
@@ -5805,9 +5976,26 @@ export default function DashboardPage() {
     }
   }, [user]);
 
-  const onOpenShareModal = (resourceType: ShareResourceType, resourceId: number, resourceName: string) => {
+  const onOpenShareModal = (
+    resourceType: ShareResourceType,
+    resourceId: number,
+    resourceName: string,
+    examContentContext?: { courseId: number; sessionId: number; contentId: number } | null,
+  ) => {
     const resourceKey = `${resourceType}:${resourceId}`;
-    setShareTarget({ resourceType, resourceId, resourceName });
+    setShareTarget({
+      resourceType,
+      resourceId,
+      resourceName,
+      examContentContext:
+        resourceType === "exam" && examContentContext
+          ? {
+              courseId: examContentContext.courseId,
+              sessionId: examContentContext.sessionId,
+              contentId: examContentContext.contentId,
+            }
+          : undefined,
+    });
     setPublicShareLink(publicShareLinksByResource[resourceKey] ?? "");
     shareRecipientsRequestVersionRef.current += 1;
     setShareRecipients([]);
@@ -5819,7 +6007,11 @@ export default function DashboardPage() {
 
     if (resourceType === "exam" && user) {
       setExamParticipantsLoading(true);
-      fetchJson(`/api/v1/ia/exams/${resourceId}/participants?userId=${user.id}`, user.token)
+      const participantsPath =
+        examContentContext != null
+          ? `/api/v1/courses/${examContentContext.courseId}/sessions/${examContentContext.sessionId}/contents/${examContentContext.contentId}/exam-participants?userId=${user.id}`
+          : `/api/v1/ia/exams/${resourceId}/participants?userId=${user.id}`;
+      fetchJson(participantsPath, user.token)
         .then((data) => {
           const participants = Array.isArray(data) ? data.filter((item) => isExamParticipantPayload(item)) : [];
           setExamParticipants(participants);
@@ -5953,10 +6145,10 @@ export default function DashboardPage() {
       })) as ShareDistributeResponse;
 
       if (shareTarget.resourceType === "exam") {
-        const participantsData = await fetchJson(
-          `/api/v1/ia/exams/${shareTarget.resourceId}/participants?userId=${user.id}`,
-          user.token,
-        );
+        const participantsPath = shareTarget.examContentContext
+          ? `/api/v1/courses/${shareTarget.examContentContext.courseId}/sessions/${shareTarget.examContentContext.sessionId}/contents/${shareTarget.examContentContext.contentId}/exam-participants?userId=${user.id}`
+          : `/api/v1/ia/exams/${shareTarget.resourceId}/participants?userId=${user.id}`;
+        const participantsData = await fetchJson(participantsPath, user.token);
         const participants = Array.isArray(participantsData)
           ? participantsData.filter((item) => isExamParticipantPayload(item))
           : [];
@@ -5997,18 +6189,25 @@ export default function DashboardPage() {
   const onOpenExamParticipantsModal = async (
     exam: ExamSummary,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
     if (!user) {
       return;
     }
     ensureExamInteractiveSurface(originSection);
     setExamParticipantsTarget(exam);
+    setExamParticipantsContentContext(contentContext ?? null);
     setExamParticipants([]);
     setShowExamParticipantsModal(true);
     setExamParticipantsLoading(true);
     setUpdatingExamParticipantUserId(null);
     try {
-      const data = await fetchJson(`/api/v1/ia/exams/${exam.id}/participants?userId=${user.id}`, user.token);
+      const data = contentContext
+        ? await fetchJson(
+            `/api/v1/courses/${contentContext.courseId}/sessions/${contentContext.sessionId}/contents/${contentContext.contentId}/exam-participants?userId=${user.id}`,
+            user.token,
+          )
+        : await fetchJson(`/api/v1/ia/exams/${exam.id}/participants?userId=${user.id}`, user.token);
       const participants = Array.isArray(data) ? data.filter((item) => isExamParticipantPayload(item)) : [];
       setExamParticipants(participants);
     } catch (participantsError) {
@@ -6019,6 +6218,7 @@ export default function DashboardPage() {
       }
       setShowExamParticipantsModal(false);
       setExamParticipantsTarget(null);
+      setExamParticipantsContentContext(null);
     } finally {
       setExamParticipantsLoading(false);
     }
@@ -6037,10 +6237,18 @@ export default function DashboardPage() {
     if ((examParticipantsTarget.accessRole ?? "viewer").toLowerCase() !== "owner") {
       return;
     }
+    const resolvedContext =
+      examParticipantsContentContext ??
+      (shareTarget?.resourceType === "exam" && shareTarget.resourceId === examParticipantsTarget.id
+        ? shareTarget.examContentContext ?? null
+        : null);
     setUpdatingExamParticipantUserId(participant.userId);
     try {
+      const updatePath = resolvedContext
+        ? `/api/v1/courses/${resolvedContext.courseId}/sessions/${resolvedContext.sessionId}/contents/${resolvedContext.contentId}/exam-participants/${participant.userId}`
+        : `/api/v1/ia/exams/${examParticipantsTarget.id}/participants/${participant.userId}`;
       await patchJson(
-        `/api/v1/ia/exams/${examParticipantsTarget.id}/participants/${participant.userId}`,
+        updatePath,
         user.token,
         {
           requesterUserId: user.id,
@@ -6050,15 +6258,15 @@ export default function DashboardPage() {
           canRenameExam: nextCanRenameExam,
         },
       );
-      const refreshedParticipantsPayload = await fetchJson(
-        `/api/v1/ia/exams/${examParticipantsTarget.id}/participants?userId=${user.id}`,
-        user.token,
-      );
+      const refreshedParticipantsPath = resolvedContext
+        ? `/api/v1/courses/${resolvedContext.courseId}/sessions/${resolvedContext.sessionId}/contents/${resolvedContext.contentId}/exam-participants?userId=${user.id}`
+        : `/api/v1/ia/exams/${examParticipantsTarget.id}/participants?userId=${user.id}`;
+      const refreshedParticipantsPayload = await fetchJson(refreshedParticipantsPath, user.token);
       const refreshedParticipants = Array.isArray(refreshedParticipantsPayload)
         ? refreshedParticipantsPayload.filter((item) => isExamParticipantPayload(item))
         : [];
       setExamParticipants(refreshedParticipants);
-      await refreshExams();
+      await refreshExams({ preserveCurrentPayload: Boolean(resolvedContext) });
       setExamFeedback("Permisos del participante actualizados.", "success");
     } catch (updateError) {
       if (updateError instanceof Error) {
@@ -6078,12 +6286,20 @@ export default function DashboardPage() {
     if (participant.owner || participant.role === "owner") {
       return;
     }
+    const resolvedContext =
+      examParticipantsContentContext ??
+      (shareTarget?.resourceType === "exam" && shareTarget.resourceId === examId
+        ? shareTarget.examContentContext ?? null
+        : null);
     setUpdatingExamParticipantUserId(participant.userId);
     try {
-      await deleteJson(`/api/v1/ia/exams/${examId}/participants/${participant.userId}?requesterUserId=${user.id}`, user.token);
+      const deletePath = resolvedContext
+        ? `/api/v1/courses/${resolvedContext.courseId}/sessions/${resolvedContext.sessionId}/contents/${resolvedContext.contentId}/exam-participants/${participant.userId}?requesterUserId=${user.id}`
+        : `/api/v1/ia/exams/${examId}/participants/${participant.userId}?requesterUserId=${user.id}`;
+      await deleteJson(deletePath, user.token);
       setExamParticipants((current) => current.filter((item) => item.userId !== participant.userId));
       setShareSelectedRecipientIds((current) => current.filter((id) => id !== participant.userId));
-      await refreshExams();
+      await refreshExams({ preserveCurrentPayload: Boolean(resolvedContext) });
       setExamFeedback("Participante eliminado del examen.", "success");
     } catch (removeError) {
       if (removeError instanceof Error) {
@@ -6958,16 +7174,57 @@ export default function DashboardPage() {
     }
   };
 
-  const refreshExams = async (): Promise<ExamSummary[]> => {
+  const refreshExams = async (
+    options?: {
+      preserveCurrentPayload?: boolean;
+    },
+  ): Promise<ExamSummary[]> => {
     if (!user) {
       return [];
     }
     const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
-    if (active === "examenes") {
+    setCourseExamCatalogById((previous) => {
+      const next = { ...previous };
+      for (const exam of exams) {
+        if (exam && typeof exam.id === "number") {
+          next[exam.id] = exam;
+        }
+      }
+      return next;
+    });
+    const runnerOpenedFromCourses =
+      (showGroupPracticeRunnerModal || showPracticeRunnerModal) && practiceOriginSection === "cursos";
+    const anchoredExamContextActive = active === "cursos" || activeExamContentContext != null;
+    const preservePayload = Boolean(options?.preserveCurrentPayload) || anchoredExamContextActive;
+    if (
+      !preservePayload &&
+      (active === "examenes" || showGroupPracticeRunnerModal || showPracticeRunnerModal) &&
+      !runnerOpenedFromCourses
+    ) {
       setPayload(exams);
     }
     return exams;
   };
+
+  useEffect(() => {
+    if (active !== "cursos") {
+      return;
+    }
+    const modulePayload = parseCourseModulePayload(payload);
+    if (modulePayload.availableExams.length === 0) {
+      return;
+    }
+    setCourseExamCatalogById((previous) => {
+      const next = { ...previous };
+      for (const examItem of modulePayload.availableExams) {
+        if (!examItem || typeof examItem.id !== "number") {
+          continue;
+        }
+        next[examItem.id] = toExamSummaryFromCourseExam(examItem);
+      }
+      return next;
+    });
+  }, [active, payload]);
 
   useEffect(() => {
     if (!user || active !== "cursos" || openedCourseId == null) {
@@ -6981,6 +7238,7 @@ export default function DashboardPage() {
     }
 
     const examIds = new Set<number>();
+    const examContextById = new Map<number, { courseId: number; sessionId: number; contentId: number }>();
     for (const session of openedCourse.sessions ?? []) {
       const allSessionContents = [
         ...(session.contents ?? []),
@@ -6991,6 +7249,18 @@ export default function DashboardPage() {
         const sourceExamId = resolveSourceExamId(content.sourceExamId);
         if ((type === "exam" || type === "examen") && sourceExamId != null) {
           examIds.add(sourceExamId);
+          if (
+            !examContextById.has(sourceExamId) &&
+            typeof openedCourse.id === "number" &&
+            typeof session.id === "number" &&
+            typeof content.id === "number"
+          ) {
+            examContextById.set(sourceExamId, {
+              courseId: openedCourse.id,
+              sessionId: session.id,
+              contentId: content.id,
+            });
+          }
         }
       }
     }
@@ -7031,10 +7301,23 @@ export default function DashboardPage() {
         }
         if (missingCatalogIds.length > 0) {
           const exams = await Promise.all(
-            missingCatalogIds.map(
-              (examId) =>
-                fetchJson(`/api/v1/ia/exams/${examId}/summary?userId=${user.id}`, user.token) as Promise<ExamSummary>,
-            ),
+            missingCatalogIds.map(async (examId) => {
+              const context = examContextById.get(examId);
+              if (context) {
+                try {
+                  return (await fetchJson(
+                    `/api/v1/courses/${context.courseId}/sessions/${context.sessionId}/contents/${context.contentId}/exam-summary?userId=${user.id}`,
+                    user.token,
+                  )) as ExamSummary;
+                } catch {
+                  // fallback para compatibilidad ante despliegues parciales
+                }
+              }
+              return (await fetchJson(
+                `/api/v1/ia/exams/${examId}/summary?userId=${user.id}`,
+                user.token,
+              )) as ExamSummary;
+            }),
           );
           if (!cancelled) {
             setCourseExamCatalogById((previous) => {
@@ -7061,7 +7344,7 @@ export default function DashboardPage() {
   const renderExamCardActions = (
     item: ExamSummary,
     options?: {
-      contentContext?: { sessionId: number; content: CourseSessionContentItem };
+      contentContext?: { courseId?: number; sessionId: number; content: CourseSessionContentItem };
       allowVisibilityToggle?: boolean;
     },
   ): ReactNode => {
@@ -7091,8 +7374,18 @@ export default function DashboardPage() {
     const actionOrigin: "ia" | "cursos" | "examenes" = fromCourseContent ? "cursos" : "examenes";
     const resolvedCourseIdForContent =
       fromCourseContent && options?.contentContext
-        ? (resolveCourseIdBySession(options.contentContext.sessionId) ?? openedCourseId)
+        ? (options.contentContext.courseId ??
+          resolveCourseIdBySession(options.contentContext.sessionId) ??
+          openedCourseId)
         : null;
+    const resolvedContentContext =
+      actionOrigin === "cursos" && resolvedCourseIdForContent != null && options?.contentContext
+        ? {
+            courseId: resolvedCourseIdForContent,
+            sessionId: options.contentContext.sessionId,
+            contentId: options.contentContext.content.id,
+          }
+        : undefined;
 
     return (
       <article className="min-w-0 rounded-lg border border-slate-300 bg-slate-50 p-3">
@@ -7103,7 +7396,7 @@ export default function DashboardPage() {
               {canRenameExam ? (
                 <button
                   type="button"
-                  onClick={() => void onRenameExamName(item, actionOrigin)}
+                  onClick={() => void onRenameExamName(item, actionOrigin, resolvedContentContext ?? null)}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
                   aria-label="Editar nombre del examen"
                   title="Editar nombre del examen"
@@ -7136,7 +7429,19 @@ export default function DashboardPage() {
           {canEditQuestions ? (
             <button
               type="button"
-              onClick={() => void onManageExamQuestions(item, actionOrigin)}
+              onClick={() =>
+                void onManageExamQuestions(
+                  item,
+                  actionOrigin,
+                  actionOrigin === "cursos" && resolvedCourseIdForContent != null && options?.contentContext
+                    ? {
+                        courseId: resolvedCourseIdForContent,
+                        sessionId: options.contentContext.sessionId,
+                        contentId: options.contentContext.content.id,
+                      }
+                    : undefined,
+                )
+              }
               className="inline-flex items-center gap-2 rounded-lg bg-[#374151] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1F2937]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7153,17 +7458,10 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => {
-              setPracticeOriginSection(actionOrigin);
-              setPracticeIntent("start");
-              if (actionOrigin === "cursos" && resolvedCourseIdForContent != null) {
-                const originUrl = `/dashboard?section=cursos&courseId=${resolvedCourseIdForContent}&courseTab=curso`;
-                router.push(
-                  `/dashboard/examenes/repaso/${item.id}?origin=cursos&courseId=${resolvedCourseIdForContent}&originUrl=${encodeURIComponent(originUrl)}`,
-                );
-                return;
-              }
-              void onStartPractice(item, false, actionOrigin);
-            }}
+                rememberExamActionContext(actionOrigin, resolvedContentContext ?? null);
+                setPracticeIntent("start");
+                void onStartPractice(item, false, actionOrigin, resolvedContentContext);
+              }}
             className="inline-flex items-center gap-2 rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-4 w-4" aria-hidden="true">
@@ -7178,17 +7476,17 @@ export default function DashboardPage() {
                 if (isAnotherGroupButtonLoading) {
                   return;
                 }
-                setPracticeOriginSection(actionOrigin);
+                rememberExamActionContext(actionOrigin, resolvedContentContext ?? null);
                 if (canStartGroupPractice) {
                   if (groupSessionActive) {
-                    void onJoinGroupPractice(item, actionOrigin);
+                    void onJoinGroupPractice(item, actionOrigin, resolvedContentContext);
                   } else {
-                    void onCreateGroupPractice(item, actionOrigin);
+                    void onCreateGroupPractice(item, actionOrigin, resolvedContentContext);
                   }
                   return;
                 }
                 if (canJoinGroupPractice) {
-                  void onJoinGroupPractice(item, actionOrigin);
+                  void onJoinGroupPractice(item, actionOrigin, resolvedContentContext);
                 }
               }}
               disabled={isGroupButtonLoading}
@@ -7208,7 +7506,13 @@ export default function DashboardPage() {
           ) : null}
           <button
             type="button"
-            onClick={() => void onOpenExamParticipantsModal(item, actionOrigin)}
+            onClick={() =>
+              void onOpenExamParticipantsModal(
+                item,
+                actionOrigin,
+                resolvedContentContext,
+              )
+            }
             className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#4B5563] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#374151]"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7221,7 +7525,7 @@ export default function DashboardPage() {
           </button>
           <button
             type="button"
-            onClick={() => void openIndividualPracticeSettingsModal(item, actionOrigin)}
+            onClick={() => void openIndividualPracticeSettingsModal(item, actionOrigin, resolvedContentContext)}
             className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#38BDF8] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#0EA5E9]"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7233,7 +7537,7 @@ export default function DashboardPage() {
           {canEditSettings ? (
             <button
               type="button"
-              onClick={() => openGroupPracticeSettingsModal(item, actionOrigin)}
+              onClick={() => openGroupPracticeSettingsModal(item, actionOrigin, resolvedContentContext)}
               className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#3B82F6] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#2563EB]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7244,7 +7548,13 @@ export default function DashboardPage() {
             </button>
           ) : null}
           {canShareExam ? (
-            <button type="button" onClick={() => onOpenShareModal("exam", item.id, item.name)} title="Compartir" aria-label="Compartir" className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#F9C200] text-white hover:bg-[#E0AD00]">
+            <button
+              type="button"
+              onClick={() => onOpenShareModal("exam", item.id, item.name, resolvedContentContext)}
+              title="Compartir"
+              aria-label="Compartir"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#F9C200] text-white hover:bg-[#E0AD00]"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
                 <circle cx="18" cy="5" r="3" />
                 <circle cx="6" cy="12" r="3" />
@@ -7259,6 +7569,7 @@ export default function DashboardPage() {
               type="button"
               onClick={() => {
                 ensureExamInteractiveSurface(actionOrigin);
+                setDeactivateExamContentContext(resolvedContentContext ?? null);
                 setSelectedExam(item);
                 setShowDeactivateModal(true);
               }}
@@ -7309,12 +7620,25 @@ export default function DashboardPage() {
         examId: selectedExam.id,
         sessionId: groupPracticeState.sessionId,
         originSection: practiceOriginSection,
+        courseId: activeExamContentContext?.courseId ?? null,
+        courseSessionId: activeExamContentContext?.sessionId ?? null,
+        contentId: activeExamContentContext?.contentId ?? null,
       }),
     );
-  }, [user, showGroupPracticeRunnerModal, selectedExam, groupPracticeState, practiceOriginSection]);
+  }, [
+    user,
+    showGroupPracticeRunnerModal,
+    selectedExam,
+    groupPracticeState,
+    practiceOriginSection,
+    activeExamContentContext,
+  ]);
 
   useEffect(() => {
-    if (!user || active !== "examenes" || showGroupPracticeRunnerModal) {
+    if (!user || showGroupPracticeRunnerModal) {
+      return;
+    }
+    if (active !== "examenes" && active !== "cursos") {
       return;
     }
     if (groupPracticeRestoreTriedRef.current) {
@@ -7331,9 +7655,23 @@ export default function DashboardPage() {
       window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
     };
 
-    let parsed: { examId?: unknown; sessionId?: unknown; originSection?: unknown };
+    let parsed: {
+      examId?: unknown;
+      sessionId?: unknown;
+      originSection?: unknown;
+      courseId?: unknown;
+      courseSessionId?: unknown;
+      contentId?: unknown;
+    };
     try {
-      parsed = JSON.parse(rawStored) as { examId?: unknown; sessionId?: unknown; originSection?: unknown };
+      parsed = JSON.parse(rawStored) as {
+        examId?: unknown;
+        sessionId?: unknown;
+        originSection?: unknown;
+        courseId?: unknown;
+        courseSessionId?: unknown;
+        contentId?: unknown;
+      };
     } catch {
       removeStored();
       return;
@@ -7350,6 +7688,23 @@ export default function DashboardPage() {
       parsed.originSection === "ia" || parsed.originSection === "cursos" || parsed.originSection === "examenes"
         ? parsed.originSection
         : "examenes";
+    const restoredCourseId = Number(parsed.courseId);
+    const restoredCourseSessionId = Number(parsed.courseSessionId);
+    const restoredContentId = Number(parsed.contentId);
+    const restoredContentContext =
+      originSection === "cursos" &&
+      Number.isFinite(restoredCourseId) &&
+      restoredCourseId > 0 &&
+      Number.isFinite(restoredCourseSessionId) &&
+      restoredCourseSessionId > 0 &&
+      Number.isFinite(restoredContentId) &&
+      restoredContentId > 0
+        ? {
+            courseId: restoredCourseId,
+            sessionId: restoredCourseSessionId,
+            contentId: restoredContentId,
+          }
+        : null;
 
     void (async () => {
       try {
@@ -7360,8 +7715,11 @@ export default function DashboardPage() {
           return;
         }
 
+        const basePath = restoredContentContext
+          ? `/api/v1/courses/${restoredContentContext.courseId}/sessions/${restoredContentContext.sessionId}/contents/${restoredContentContext.contentId}/exam-practice`
+          : `/api/v1/ia/exams/${targetExam.id}/practice`;
         const state = (await fetchJson(
-          `/api/v1/ia/exams/${targetExam.id}/practice/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
+          `${basePath}/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
           user.token,
         )) as ExamGroupState;
         const status = (state.status ?? "").toLowerCase();
@@ -7370,7 +7728,16 @@ export default function DashboardPage() {
           return;
         }
 
-        setPracticeOriginSection(originSection);
+        rememberExamActionContext(originSection, restoredContentContext);
+        if (originSection === "cursos") {
+          setOpenedCourseTab("curso");
+          if (restoredContentContext?.courseId != null) {
+            setOpenedCourseId(restoredContentContext.courseId);
+          }
+          if (restoredContentContext?.sessionId != null) {
+            setExpandedSessionId(restoredContentContext.sessionId);
+          }
+        }
         setSelectedExam(targetExam);
         setGroupPracticeState(state);
         setShowGroupPracticeRunnerModal(true);
@@ -7404,7 +7771,7 @@ export default function DashboardPage() {
       return;
     }
 
-    setPracticeOriginSection("ia");
+    rememberExamActionContext("ia", null);
     setActive("examenes");
     setPracticeIntent("start");
 
@@ -7432,7 +7799,7 @@ export default function DashboardPage() {
   };
 
   const replaceExamInPayload = (updatedExam: ExamSummary) => {
-    if (Array.isArray(payload)) {
+    if (isExamSummaryArrayPayload(payload)) {
       const next = (payload as ExamSummary[]).map((item) => (item.id === updatedExam.id ? updatedExam : item));
       setPayload(next);
     }
@@ -7459,10 +7826,100 @@ export default function DashboardPage() {
     ensureExamActionSurface();
   };
 
-  const openManageExamModal = (exam: ExamSummary, questions: ExamQuestion[]) => {
+  const rememberPracticeOriginContext = (
+    originSection: "ia" | "cursos" | "examenes",
+    courseId?: number | null,
+    sessionId?: number | null,
+  ) => {
+    setPracticeOriginSection(originSection);
+    if (originSection === "cursos") {
+      setPracticeOriginCourseId(courseId ?? openedCourseId ?? null);
+      setPracticeOriginSessionId(sessionId ?? null);
+      return;
+    }
+    setPracticeOriginCourseId(null);
+    setPracticeOriginSessionId(null);
+  };
+
+  const resolveExamPracticeBasePath = (
+    examId: number,
+    context?: { courseId: number; sessionId: number; contentId: number } | null,
+  ) => {
+    const activeContext = context ?? activeExamContentContext;
+    if (activeContext) {
+      return `/api/v1/courses/${activeContext.courseId}/sessions/${activeContext.sessionId}/contents/${activeContext.contentId}/exam-practice`;
+    }
+    return `/api/v1/ia/exams/${examId}/practice`;
+  };
+
+  const resolveExamManualEndpoint = (
+    examId: number,
+    operation: "list" | "create" | "update",
+    questionId?: number,
+    context?: { courseId: number; sessionId: number; contentId: number } | null,
+  ) => {
+    const activeContext = context ?? activeExamContentContext;
+    if (activeContext) {
+      const base = `/api/v1/courses/${activeContext.courseId}/sessions/${activeContext.sessionId}/contents/${activeContext.contentId}`;
+      if (operation === "list" || operation === "create") {
+        return `${base}/exam-questions`;
+      }
+      return `${base}/exam-questions/${questionId}`;
+    }
+    const base = `/api/v1/ia/exams/${examId}`;
+    if (operation === "list") {
+      return `${base}/manual`;
+    }
+    if (operation === "create") {
+      return `${base}/manual/questions`;
+    }
+    return `${base}/manual/questions/${questionId}`;
+  };
+
+  const rememberExamActionContext = (
+    originSection: "ia" | "cursos" | "examenes",
+    context?: { courseId: number; sessionId: number; contentId: number } | null,
+  ) => {
+    rememberPracticeOriginContext(
+      originSection,
+      originSection === "cursos" ? (context?.courseId ?? openedCourseId ?? null) : null,
+      originSection === "cursos" ? (context?.sessionId ?? null) : null,
+    );
+    if (originSection === "cursos" && context) {
+      setActiveExamContentContext(context);
+      return;
+    }
+    setActiveExamContentContext(null);
+  };
+
+  const restorePracticeOriginSurface = () => {
+    if (practiceOriginSection === "ia") {
+      setActive("ia");
+      return;
+    }
+    if (practiceOriginSection === "cursos") {
+      if (practiceOriginCourseId != null) {
+        setOpenedCourseId(practiceOriginCourseId);
+      }
+      setOpenedCourseTab("curso");
+      if (practiceOriginSessionId != null) {
+        setExpandedSessionId(practiceOriginSessionId);
+      }
+      setActive("cursos");
+      return;
+    }
+    setActive("examenes");
+  };
+
+  const openManageExamModal = (
+    exam: ExamSummary,
+    questions: ExamQuestion[],
+    contentContext?: { courseId: number; sessionId: number; contentId: number } | null,
+  ) => {
     ensureExamActionSurface();
     setSelectedExam(exam);
     setManagedExamQuestions(questions);
+    setManageExamContentContext(contentContext ?? null);
     setEditingQuestionId(null);
     setManualQuestionForm(createEmptyManualQuestionForm());
     setShowManageModal(true);
@@ -7471,8 +7928,11 @@ export default function DashboardPage() {
   const onRenameExamName = (
     exam: ExamSummary,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number } | null,
   ) => {
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
+    setRenameExamContentContext(contentContext ?? null);
     setRenameExamTarget(exam);
     setRenameExamNameDraft((exam.name ?? "").trim());
     setShowRenameExamModal(true);
@@ -7494,25 +7954,37 @@ export default function DashboardPage() {
     if (nextName === currentName) {
       setShowRenameExamModal(false);
       setRenameExamTarget(null);
+      setRenameExamContentContext(null);
       return;
     }
 
     setRenamingExam(true);
     try {
-      const updatedExam = (await patchJson(`/api/v1/ia/exams/${renameExamTarget.id}/name`, user.token, {
+      const renamePath = renameExamContentContext
+        ? `/api/v1/courses/${renameExamContentContext.courseId}/sessions/${renameExamContentContext.sessionId}/contents/${renameExamContentContext.contentId}/exam/name`
+        : `/api/v1/ia/exams/${renameExamTarget.id}/name`;
+      const updatedExam = (await patchJson(renamePath, user.token, {
         userId: user.id,
         examName: nextName,
       })) as ExamSummary;
       replaceExamInPayload(updatedExam);
+      setCourseExamCatalogById((previous) => ({ ...previous, [updatedExam.id]: updatedExam }));
       if (selectedExam && selectedExam.id === renameExamTarget.id) {
         setSelectedExam(updatedExam);
       }
       if (examParticipantsTarget && examParticipantsTarget.id === renameExamTarget.id) {
         setExamParticipantsTarget(updatedExam);
       }
+      if (renameExamContentContext) {
+        await refreshCoursesPreserveView(
+          renameExamContentContext.courseId,
+          renameExamContentContext.sessionId,
+        );
+      }
       setExamFeedback("Nombre del examen actualizado.", "success");
       setShowRenameExamModal(false);
       setRenameExamTarget(null);
+      setRenameExamContentContext(null);
     } catch (renameError) {
       if (renameError instanceof Error) {
         setExamFeedback(renameError.message, "error");
@@ -7742,18 +8214,22 @@ export default function DashboardPage() {
   const onManageExamQuestions = async (
     exam: ExamSummary,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
     if (!user) {
       return;
     }
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
 
     try {
-      const questions = (await fetchJson(
-        `/api/v1/ia/exams/${exam.id}/manual?userId=${user.id}`,
-        user.token,
-      )) as ExamQuestion[];
-      openManageExamModal(exam, questions);
+      const questions = (await (contentContext
+        ? fetchJson(
+            `/api/v1/courses/${contentContext.courseId}/sessions/${contentContext.sessionId}/contents/${contentContext.contentId}/exam-questions?userId=${user.id}`,
+            user.token,
+          )
+        : fetchJson(`/api/v1/ia/exams/${exam.id}/manual?userId=${user.id}`, user.token))) as ExamQuestion[];
+      openManageExamModal(exam, questions, contentContext ?? null);
       setExamFeedbackInContext(`Examen '${exam.name}': ${questions.length} preguntas cargadas.`, "info", originSection);
     } catch (manageError) {
       if (manageError instanceof Error) {
@@ -7764,19 +8240,34 @@ export default function DashboardPage() {
     }
   };
 
-  const onInactivateExam = async (exam: ExamSummary) => {
+  const onInactivateExam = async (
+    exam: ExamSummary,
+    contentContext?: { courseId: number; sessionId: number; contentId: number } | null,
+  ) => {
     if (!user) {
       return;
     }
 
     try {
-      await deleteJson(`/api/v1/ia/exams/${exam.id}?userId=${user.id}`, user.token);
-      await refreshExams();
+      const deletePath = contentContext
+        ? `/api/v1/courses/${contentContext.courseId}/sessions/${contentContext.sessionId}/contents/${contentContext.contentId}/exam?userId=${user.id}`
+        : `/api/v1/ia/exams/${exam.id}?userId=${user.id}`;
+      await deleteJson(deletePath, user.token);
+      await refreshExams({ preserveCurrentPayload: true });
+      setCourseExamCatalogById((previous) => {
+        const next = { ...previous };
+        delete next[exam.id];
+        return next;
+      });
       if (selectedExam?.id === exam.id) {
         setSelectedExam(null);
         setManagedExamQuestions([]);
       }
+      if (contentContext) {
+        await refreshCoursesPreserveView(contentContext.courseId, contentContext.sessionId);
+      }
       setShowDeactivateModal(false);
+      setDeactivateExamContentContext(null);
       clearPracticeDraft(exam.id);
       setExamFeedback(`Examen '${exam.name}' inactivado correctamente.`, "success");
     } catch (deleteError) {
@@ -7883,20 +8374,20 @@ export default function DashboardPage() {
       let savedQuestion: ExamQuestion;
       if (editingQuestionId != null) {
         savedQuestion = (await patchJson(
-          `/api/v1/ia/exams/${selectedExam.id}/manual/questions/${editingQuestionId}`,
+          resolveExamManualEndpoint(selectedExam.id, "update", editingQuestionId, manageExamContentContext),
           user.token,
           body,
         )) as ExamQuestion;
       } else {
         savedQuestion = (await postJson(
-          `/api/v1/ia/exams/${selectedExam.id}/manual/questions`,
+          resolveExamManualEndpoint(selectedExam.id, "create", undefined, manageExamContentContext),
           user.token,
           body,
         )) as ExamQuestion;
       }
 
       const refreshedQuestions = (await fetchJson(
-        `/api/v1/ia/exams/${selectedExam.id}/manual?userId=${user.id}`,
+        `${resolveExamManualEndpoint(selectedExam.id, "list", undefined, manageExamContentContext)}?userId=${user.id}`,
         user.token,
       )) as ExamQuestion[];
 
@@ -7909,6 +8400,13 @@ export default function DashboardPage() {
       };
       setSelectedExam(updatedExam);
       replaceExamInPayload(updatedExam);
+      setCourseExamCatalogById((previous) => ({ ...previous, [updatedExam.id]: updatedExam }));
+      if (manageExamContentContext) {
+        await refreshCoursesPreserveView(
+          manageExamContentContext.courseId,
+          manageExamContentContext.sessionId,
+        );
+      }
 
       setExamFeedback(
         editingQuestionId != null
@@ -7933,7 +8431,11 @@ export default function DashboardPage() {
     practiceProgressMode: exam.practiceRepeatUntilCorrect === false ? "allow_incorrect_pass" : "repeat_until_correct",
   });
 
-  const loadIndividualPracticeSettings = async (exam: ExamSummary, forceReload = false): Promise<PracticeSettingsPayload> => {
+  const loadIndividualPracticeSettings = async (
+    exam: ExamSummary,
+    forceReload = false,
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
+  ): Promise<PracticeSettingsPayload> => {
     if (!user) {
       return resolvePracticeSettingsFromExam(exam);
     }
@@ -7945,7 +8447,7 @@ export default function DashboardPage() {
 
     try {
       const response = (await fetchJson(
-        `/api/v1/ia/exams/${exam.id}/practice/settings/individual?userId=${user.id}`,
+        `${resolveExamPracticeBasePath(exam.id, contentContext)}/settings/individual?userId=${user.id}`,
         user.token,
       )) as PracticeSettingsPayload;
       const normalized: PracticeSettingsPayload = {
@@ -7964,9 +8466,11 @@ export default function DashboardPage() {
   const openGroupPracticeSettingsModal = (
     exam: ExamSummary,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
-    setPracticeOriginSection(originSection);
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
+    setPracticeSettingsContentContext(contentContext ?? null);
     setSelectedExam(exam);
     const defaults = resolvePracticeSettingsFromExam(exam);
     setPracticeFeedbackMode(defaults.practiceFeedbackMode);
@@ -7979,11 +8483,13 @@ export default function DashboardPage() {
   const openIndividualPracticeSettingsModal = async (
     exam: ExamSummary,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
-    setPracticeOriginSection(originSection);
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
+    setPracticeSettingsContentContext(contentContext ?? null);
     setSelectedExam(exam);
-    const settings = await loadIndividualPracticeSettings(exam, true);
+    const settings = await loadIndividualPracticeSettings(exam, true, contentContext);
     setPracticeFeedbackMode(settings.practiceFeedbackMode);
     setPracticeOrderMode(settings.practiceOrderMode);
     setPracticeProgressMode(settings.practiceProgressMode);
@@ -7998,7 +8504,7 @@ export default function DashboardPage() {
     setSavingPracticeSettings(true);
     try {
       const updated = (await patchJson(
-        `/api/v1/ia/exams/${selectedExam.id}/practice/settings`,
+        `${resolveExamPracticeBasePath(selectedExam.id, practiceSettingsContentContext)}/settings`,
         user.token,
         {
           userId: user.id,
@@ -8009,13 +8515,21 @@ export default function DashboardPage() {
         },
       )) as ExamSummary;
 
-      if (Array.isArray(payload)) {
+      if (isExamSummaryArrayPayload(payload)) {
         const next = (payload as ExamSummary[]).map((item) => (item.id === updated.id ? updated : item));
         setPayload(next);
       }
 
       setSelectedExam(updated);
+      setCourseExamCatalogById((previous) => ({ ...previous, [updated.id]: updated }));
+      if (practiceSettingsContentContext) {
+        await refreshCoursesPreserveView(
+          practiceSettingsContentContext.courseId,
+          practiceSettingsContentContext.sessionId,
+        );
+      }
       setShowGroupSettingsModal(false);
+      setPracticeSettingsContentContext(null);
       setExamFeedback("Configuracion de repaso grupal guardada.", "success");
     } catch (saveError) {
       if (saveError instanceof Error) {
@@ -8036,7 +8550,7 @@ export default function DashboardPage() {
     setSavingPracticeSettings(true);
     try {
       const updated = (await patchJson(
-        `/api/v1/ia/exams/${selectedExam.id}/practice/settings/individual`,
+        `${resolveExamPracticeBasePath(selectedExam.id, practiceSettingsContentContext)}/settings/individual`,
         user.token,
         {
           userId: user.id,
@@ -8054,7 +8568,14 @@ export default function DashboardPage() {
       };
 
       setIndividualPracticeSettingsByExamId((previous) => ({ ...previous, [selectedExam.id]: normalized }));
+      if (practiceSettingsContentContext) {
+        await refreshCoursesPreserveView(
+          practiceSettingsContentContext.courseId,
+          practiceSettingsContentContext.sessionId,
+        );
+      }
       setShowIndividualSettingsModal(false);
+      setPracticeSettingsContentContext(null);
       setExamFeedback("Configuracion de repaso individual guardada.", "success");
     } catch (saveError) {
       if (saveError instanceof Error) {
@@ -8071,15 +8592,16 @@ export default function DashboardPage() {
     examOverride?: ExamSummary,
     restart = false,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
     const exam = examOverride ?? selectedExam;
     if (!user || !exam) {
       return;
     }
-    setPracticeOriginSection(originSection);
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
 
-    const individualSettings = await loadIndividualPracticeSettings(exam);
+    const individualSettings = await loadIndividualPracticeSettings(exam, false, contentContext);
     const effectiveFeedbackMode = individualSettings.practiceFeedbackMode;
     const effectiveOrderMode = individualSettings.practiceOrderMode;
     const effectiveProgressMode = individualSettings.practiceProgressMode;
@@ -8092,7 +8614,7 @@ export default function DashboardPage() {
     try {
       const hadOpenDraft = hasOpenPracticeDraft(exam.id);
       const questions = (await fetchJson(
-        `/api/v1/ia/exams/${exam.id}/manual?userId=${user.id}`,
+        `${resolveExamManualEndpoint(exam.id, "list", undefined, contentContext)}?userId=${user.id}`,
         user.token,
       )) as ExamQuestion[];
 
@@ -8129,7 +8651,7 @@ export default function DashboardPage() {
       }
 
       if (shouldRegisterAttempt) {
-        await postJson(`/api/v1/ia/exams/${exam.id}/practice/start`, user.token, {
+        await postJson(`${resolveExamPracticeBasePath(exam.id, contentContext)}/start`, user.token, {
           userId: user.id,
         });
       }
@@ -8143,6 +8665,7 @@ export default function DashboardPage() {
       resetPracticeInputState();
       setShowPracticeModal(false);
       setShowManageModal(false);
+      setManageExamContentContext(null);
       setShowPracticeRunnerModal(true);
 
       savePracticeDraft(
@@ -8154,7 +8677,7 @@ export default function DashboardPage() {
       );
 
       if (shouldRegisterAttempt) {
-        await refreshExams();
+        await refreshExams({ preserveCurrentPayload: originSection === "cursos" });
       }
 
       if (restart) {
@@ -8184,12 +8707,13 @@ export default function DashboardPage() {
   const onJoinGroupPractice = async (
     examOverride?: ExamSummary,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
     const exam = examOverride ?? selectedExam;
     if (!user || !exam) {
       return;
     }
-    setPracticeOriginSection(originSection);
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
 
     suppressGroupRoomClosedModalRef.current = false;
@@ -8197,12 +8721,13 @@ export default function DashboardPage() {
     setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
     try {
-      const state = (await postJson(`/api/v1/ia/exams/${exam.id}/practice/group/join`, user.token, {
+      const state = (await postJson(`${resolveExamPracticeBasePath(exam.id, contentContext)}/group/join`, user.token, {
         userId: user.id,
       })) as ExamGroupState;
       setGroupPracticeState(state);
       setShowPracticeModal(false);
       setShowManageModal(false);
+      setManageExamContentContext(null);
       setShowPracticeRunnerModal(false);
       setShowGroupPracticeRunnerModal(true);
       setPracticeFeedbackStatus(null);
@@ -8228,7 +8753,7 @@ export default function DashboardPage() {
 
           if (isCreator) {
              setExamFeedbackInContext("La sesion expiro por inactividad. Creando una nueva...", "error", originSection);
-             void onCreateGroupPractice(exam, originSection);
+             void onCreateGroupPractice(exam, originSection, contentContext);
           } else {
              setExamFeedbackInContext("El repaso grupal acabo o caduco por inactividad. Pide al creador que inicie uno nuevo.", "error", originSection);
           }
@@ -8247,12 +8772,13 @@ export default function DashboardPage() {
   const onCreateGroupPractice = async (
     examOverride?: ExamSummary,
     originSection: "ia" | "cursos" | "examenes" = "examenes",
+    contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
     const exam = examOverride ?? selectedExam;
     if (!user || !exam) {
       return;
     }
-    setPracticeOriginSection(originSection);
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
 
     suppressGroupRoomClosedModalRef.current = false;
@@ -8260,18 +8786,19 @@ export default function DashboardPage() {
     setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
     try {
-      const state = (await postJson(`/api/v1/ia/exams/${exam.id}/practice/group/create`, user.token, {
+      const state = (await postJson(`${resolveExamPracticeBasePath(exam.id, contentContext)}/group/create`, user.token, {
         userId: user.id,
       })) as ExamGroupState;
       setGroupPracticeState((previous) => mergeGroupState(previous, state));
       setShowPracticeModal(false);
       setShowManageModal(false);
+      setManageExamContentContext(null);
       setShowPracticeRunnerModal(false);
       setShowGroupPracticeRunnerModal(true);
       setPracticeFeedbackStatus(null);
       resetPracticeInputState();
       setExamFeedbackInContext("Repaso grupal creado. Esperando participantes.", "success", originSection);
-      await refreshExams();
+      await refreshExams({ preserveCurrentPayload: originSection === "cursos" });
     } catch (groupError) {
       if (groupError instanceof Error) {
         const rawMessage = groupError.message || "";
@@ -8301,10 +8828,14 @@ export default function DashboardPage() {
     }
     setGroupPracticeLoading(true);
     try {
-      const state = (await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/start`, user.token, {
+      const state = (await postJson(
+        `${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/start`,
+        user.token,
+        {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
-      })) as ExamGroupState;
+      },
+      )) as ExamGroupState;
       setGroupPracticeState((previous) => mergeGroupState(previous, state));
       setGroupAnswersByQuestionKey({});
       setGroupSubmittedQuestionKey(null);
@@ -8359,7 +8890,10 @@ export default function DashboardPage() {
 
     setSubmittingGroupAnswer(true);
     try {
-      const state = (await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/answer`, user.token, {
+      const state = (await postJson(
+        `${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/answer`,
+        user.token,
+        {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
         questionId: currentQuestion.id,
@@ -8367,7 +8901,8 @@ export default function DashboardPage() {
         selectedOption: currentQuestion.questionType === "multiple_choice" ? selectedOptionForCurrentQuestion : null,
         writtenAnswer:
           currentQuestion.questionType === "multiple_choice" ? null : writtenAnswerForCurrentQuestion || null,
-      })) as ExamGroupState;
+      },
+      )) as ExamGroupState;
       let resolvedState: ExamGroupState = state;
       setGroupPracticeState((previousState) => {
         if (!previousState || previousState.sessionId !== state.sessionId) {
@@ -8429,17 +8964,21 @@ export default function DashboardPage() {
     }
     setAdvancingGroupQuestion(true);
     try {
-      const state = (await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/next`, user.token, {
+      const state = (await postJson(
+        `${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/next`,
+        user.token,
+        {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
-      })) as ExamGroupState;
+      },
+      )) as ExamGroupState;
       setGroupPracticeState((previous) => mergeGroupState(previous, state));
       setPracticeFeedbackStatus(null);
       setGroupTimerExpired(false);
       resetPracticeInputState();
       if (state.status === "finished") {
         setExamFeedback("Repaso grupal finalizado.", "success");
-        await refreshExams();
+        await refreshExams({ preserveCurrentPayload: Boolean(activeExamContentContext) });
       } else {
         setExamFeedback("Pregunta grupal avanzada.", "info");
       }
@@ -8465,6 +9004,7 @@ export default function DashboardPage() {
       setGroupPracticeState(state);
       setShowPracticeModal(false);
       setShowManageModal(false);
+      setManageExamContentContext(null);
       setShowPracticeRunnerModal(false);
       setShowGroupPracticeRunnerModal(true);
       setGroupQuestionElapsedSeconds(0);
@@ -8485,38 +9025,38 @@ export default function DashboardPage() {
     try {
       const currentStatus = (groupPracticeState.status ?? "").toLowerCase();
       if (currentStatus === "active") {
-        await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/close`, user.token, {
+        await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/close`, user.token, {
           userId: user.id,
           sessionId: groupPracticeState.sessionId,
         });
       }
 
-      const waitingState = (await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/restart`, user.token, {
+      const waitingState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/restart`, user.token, {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
       })) as ExamGroupState;
       applyWaitingGroupState(waitingState, "Examen grupal finalizado. Todos volvieron a sala de espera.");
-      await refreshExams();
+      await refreshExams({ preserveCurrentPayload: practiceOriginSection === "cursos" });
     } catch (restartError) {
       try {
-        const latestState = (await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/join`, user.token, {
+        const latestState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/join`, user.token, {
           userId: user.id,
         })) as ExamGroupState;
 
-        const waitingState = (await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/restart`, user.token, {
+        const waitingState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/restart`, user.token, {
           userId: user.id,
           sessionId: latestState.sessionId,
         })) as ExamGroupState;
 
         applyWaitingGroupState(waitingState, "Examen grupal finalizado y enviado a espera con la sesion mas reciente.");
-        await refreshExams();
+        await refreshExams({ preserveCurrentPayload: Boolean(activeExamContentContext) });
       } catch (fallbackRestartError) {
         try {
-          const createdWaitingState = (await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/create`, user.token, {
+          const createdWaitingState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/create`, user.token, {
             userId: user.id,
           })) as ExamGroupState;
           applyWaitingGroupState(createdWaitingState, "No habia sesion activa. Se creo una nueva sala en espera.");
-          await refreshExams();
+          await refreshExams({ preserveCurrentPayload: Boolean(activeExamContentContext) });
         } catch (createSessionError) {
           const msg =
             createSessionError instanceof Error
@@ -8803,7 +9343,8 @@ export default function DashboardPage() {
     }
     setShowPracticeRunnerModal(false);
     setPracticeIntent("start");
-    setActive(practiceOriginSection === "ia" ? "ia" : practiceOriginSection === "cursos" ? "cursos" : "examenes");
+    setActiveExamContentContext(null);
+    restorePracticeOriginSurface();
   };
 
   const onClosePracticeRunnerWithoutSave = () => {
@@ -8818,7 +9359,8 @@ export default function DashboardPage() {
     setPracticeIntent("start");
     resetPracticeInputState();
     setExamFeedback("Saliste del repaso sin guardar avance.", "info");
-    setActive(practiceOriginSection === "ia" ? "ia" : practiceOriginSection === "cursos" ? "cursos" : "examenes");
+    setActiveExamContentContext(null);
+    restorePracticeOriginSurface();
   };
 
   const onCloseGroupPracticeRunner = () => {
@@ -8839,7 +9381,8 @@ export default function DashboardPage() {
     setGroupTimerExpired(false);
     groupQuestionRuntimeKeyRef.current = null;
     resetPracticeInputState();
-    setActive(practiceOriginSection === "ia" ? "ia" : practiceOriginSection === "cursos" ? "cursos" : "examenes");
+    setActiveExamContentContext(null);
+    restorePracticeOriginSurface();
   };
 
   const onKeepViewingClosedGroupRoomResult = () => {
@@ -8857,7 +9400,6 @@ export default function DashboardPage() {
     setGroupRoomClosedKeepViewing(false);
     setGroupRoomClosedAllowKeepViewing(true);
     onCloseGroupPracticeRunner();
-    setActive("examenes");
   };
 
   const onCloseGroupWaitingRoom = async () => {
@@ -8868,14 +9410,19 @@ export default function DashboardPage() {
     suppressGroupRoomClosedModalRef.current = true;
     setClosingGroupWaitingRoom(true);
     try {
-      await postJson(`/api/v1/ia/exams/${selectedExam.id}/practice/group/close`, user.token, {
+      await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/close`, user.token, {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
       });
 
       onCloseGroupPracticeRunner();
-      setExamFeedback("Sala de espera cerrada. Regresaste al modulo de examenes.", "success");
-      await refreshExams();
+      setExamFeedback(
+        practiceOriginSection === "cursos"
+          ? "Sala de espera cerrada. Regresaste al curso."
+          : "Sala de espera cerrada. Regresaste al modulo de examenes.",
+        "success",
+      );
+      await refreshExams({ preserveCurrentPayload: practiceOriginSection === "cursos" });
     } catch (closeError) {
       suppressGroupRoomClosedModalRef.current = false;
       if (closeError instanceof Error) {
@@ -8939,7 +9486,7 @@ export default function DashboardPage() {
         groupStatePollInFlightRef.current = true;
         try {
           const state = (await fetchJson(
-            `/api/v1/ia/exams/${examId}/practice/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
+            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
             user.token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, state));
@@ -8964,11 +9511,9 @@ export default function DashboardPage() {
             return;
           }
           try {
-            const latestState = (await postJson(
-              `/api/v1/ia/exams/${examId}/practice/group/join`,
-              user.token,
-              { userId: user.id },
-            )) as ExamGroupState;
+            const latestState = (await postJson(`${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/join`, user.token, {
+              userId: user.id,
+            })) as ExamGroupState;
             if (latestState && latestState.sessionId !== sessionId) {
               applyLatestSessionState(latestState);
             } else if (latestState) {
@@ -9005,6 +9550,7 @@ export default function DashboardPage() {
     user,
     selectedExam,
     groupPracticeState?.sessionId,
+    activeExamContentContext,
   ]);
 
   useEffect(() => {
@@ -9241,7 +9787,7 @@ export default function DashboardPage() {
       void (async () => {
         try {
           const freshState = (await fetchJson(
-            `/api/v1/ia/exams/${examId}/practice/group/state?userId=${userId}&sessionId=${sessionId}&ts=${Date.now()}`,
+            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${userId}&sessionId=${sessionId}&ts=${Date.now()}`,
             token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, freshState));
@@ -9295,6 +9841,7 @@ export default function DashboardPage() {
     groupPracticeState?.serverNowEpochMs,
     user,
     selectedExam,
+    activeExamContentContext,
   ]);
 
   const selectedSala = useMemo(
@@ -11368,7 +11915,7 @@ export default function DashboardPage() {
                                                           <div className="mt-2">
                                                             {sourceExam ? (
                                                               renderExamCardActions(sourceExam, {
-                                                                contentContext: { sessionId: session.id, content },
+                                                                contentContext: { courseId: openedCourseId ?? undefined, sessionId: session.id, content },
                                                                 allowVisibilityToggle: !openedCourseIsOwner,
                                                               })
                                                             ) : (
@@ -11438,174 +11985,6 @@ export default function DashboardPage() {
                                           ))}
                                       </div>
                                     ) : null}
-
-                                    {false ? (<div className="space-y-2">
-                                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Contenidos guardados</p>
-                                      {(() => {
-                                        const sessionContents =
-                                          (session.contents ?? []).length > 0
-                                            ? (session.contents ?? [])
-                                            : (session.weeks ?? []).flatMap((week) => week.contents ?? []);
-                                        return sessionContents.length > 0 ? (
-                                        <div className="space-y-2">
-                                          {sessionContents.map((content) => {
-                                            const contentType = (content.type ?? "").toLowerCase();
-                                            const typeLabel =
-                                              contentType === "video"
-                                                ? "Video"
-                                                : contentType === "pdf"
-                                                  ? "PDF"
-                                                  : contentType === "word"
-                                                    ? "Word"
-                                                    : contentType === "exam"
-                                                      ? "Examen"
-                                                    : contentType === "cover"
-                                                      ? "Portada"
-                                                      : "Contenido";
-                                            return (
-                                              <div
-                                                key={content.id}
-                                                className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700"
-                                              >
-                                                <div className="min-w-0">
-                                                  <p className="font-semibold text-slate-800">
-                                                    {content.title?.trim() || "Sin nombre"} - {typeLabel}
-                                                  </p>
-                                                  {content.weekName?.trim() ? (
-                                                    <p className="text-[11px] font-semibold text-indigo-700">
-                                                      {content.weekName}
-                                                    </p>
-                                                  ) : null}
-                                                  {content.externalLink?.trim() ? (
-                                                    <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => onOpenCourseContentPreview(content)}
-                                                        className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                                                      >
-                                                        Ver
-                                                      </button>
-                                                      <a
-                                                        href={content.externalLink}
-                                                        target="_blank"
-                                                        rel="noreferrer"
-                                                        className="rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
-                                                      >
-                                                        Abrir enlace
-                                                      </a>
-                                                    </div>
-                                                  ) : null}
-                                                  {content.fileName?.trim() ? (
-                                                    <div className="mt-0.5 flex flex-wrap items-center gap-2">
-                                                      <p className="max-w-[280px] truncate text-slate-600">{content.fileName}</p>
-                                                      {content.fileData?.trim() ? (
-                                                        <>
-                                                          <button
-                                                            type="button"
-                                                            onClick={() => onOpenCourseContentPreview(content)}
-                                                            className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100"
-                                                          >
-                                                            Ver
-                                                          </button>
-                                                          <a
-                                                            href={content.fileData}
-                                                            download={content.fileName}
-                                                            className="rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
-                                                          >
-                                                            Descargar
-                                                          </a>
-                                                        </>
-                                                      ) : null}
-                                                    </div>
-                                                  ) : null}
-                                                  {contentType === "exam" ? (
-                                                    <div className="mt-1 flex flex-wrap items-center gap-2">
-                                                      <span className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                                                        {content.sourceExamName?.trim() || "Examen anclado"}
-                                                      </span>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => void onStartPracticeFromCourseSessionContent(session.id, content)}
-                                                        className="rounded-md border border-blue-300 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100"
-                                                      >
-                                                        Iniciar repaso
-                                                      </button>
-                                                      {!openedCourseIsOwner && typeof content.sourceExamId === "number" && content.sourceExamId > 0 ? (
-                                                        <button
-                                                          type="button"
-                                                          onClick={() => void onToggleAnchoredExamVisibility(content)}
-                                                          disabled={Boolean(anchoredExamVisibilityLoadingById[content.sourceExamId])}
-                                                          className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
-                                                        >
-                                                          {Boolean(anchoredExamVisibilityLoadingById[content.sourceExamId])
-                                                            ? "Actualizando..."
-                                                            : Boolean(anchoredExamVisibilityById[content.sourceExamId])
-                                                              ? "Ocultar de Examenes"
-                                                              : "Visualizar en Examenes"}
-                                                        </button>
-                                                      ) : null}
-                                                    </div>
-                                                  ) : null}
-                                                </div>
-                                                {openedCourseIsOwner ? (
-                                                  <div className="flex items-center gap-1">
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => onOpenEditSessionContentModal(session, content)}
-                                                      title="Editar contenido"
-                                                      aria-label="Editar contenido"
-                                                      disabled={deletingSessionContentId === content.id}
-                                                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 disabled:opacity-60"
-                                                    >
-                                                      <svg
-                                                        xmlns="http://www.w3.org/2000/svg"
-                                                        viewBox="0 0 24 24"
-                                                        fill="none"
-                                                        stroke="currentColor"
-                                                        strokeWidth="2"
-                                                        className="h-3.5 w-3.5"
-                                                      >
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="m3 21 3.8-1 11.4-11.4a2.1 2.1 0 0 0-3-3L3.8 17 3 21z" />
-                                                        <path strokeLinecap="round" strokeLinejoin="round" d="m14.5 6.5 3 3" />
-                                                      </svg>
-                                                    </button>
-                                                    <button
-                                                      type="button"
-                                                      onClick={() => void onDeleteSessionContent(session, content)}
-                                                      title="Eliminar contenido"
-                                                      aria-label="Eliminar contenido"
-                                                      disabled={deletingSessionContentId === content.id}
-                                                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-60"
-                                                    >
-                                                      {deletingSessionContentId === content.id ? (
-                                                        <span className="text-[10px] font-semibold">...</span>
-                                                      ) : (
-                                                        <svg
-                                                          xmlns="http://www.w3.org/2000/svg"
-                                                          viewBox="0 0 24 24"
-                                                          fill="none"
-                                                          stroke="currentColor"
-                                                          strokeWidth="2"
-                                                          className="h-3.5 w-3.5"
-                                                        >
-                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 6h18" />
-                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M8 6V4h8v2" />
-                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 6l-1 14H6L5 6" />
-                                                          <path strokeLinecap="round" strokeLinejoin="round" d="M10 11v6M14 11v6" />
-                                                        </svg>
-                                                      )}
-                                                    </button>
-                                                  </div>
-                                                ) : null}
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      ) : (
-                                        <p className="text-xs text-slate-500">No hay contenidos guardados aun.</p>
-                                      );
-                                    })()}
-                                    </div>) : null}
 
                                     {openedCourseIsOwner ? (
                                       <div className="flex justify-end gap-2">
@@ -14102,7 +14481,12 @@ export default function DashboardPage() {
                     type="button"
                     onClick={() => {
                       setPracticeIntent("restart");
-                      void onStartPractice(undefined, true);
+                      void onStartPractice(
+                        undefined,
+                        true,
+                        practiceOriginSection,
+                        activeExamContentContext ?? undefined,
+                      );
                     }}
                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
                   >
@@ -14579,7 +14963,7 @@ export default function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          setPracticeOriginSection("examenes");
+                          rememberExamActionContext("examenes", null);
                           setPracticeIntent("start");
                           void onStartPractice(item, false);
                         }}
@@ -14603,7 +14987,7 @@ export default function DashboardPage() {
                             if (isAnotherGroupButtonLoading) {
                               return;
                             }
-                            setPracticeOriginSection("examenes");
+                            rememberExamActionContext("examenes", null);
                             if (canStartGroupPractice) {
                               if (groupSessionActive) {
                                 void onJoinGroupPractice(item);
@@ -14748,6 +15132,7 @@ export default function DashboardPage() {
                         <button
                           type="button"
                           onClick={() => {
+                            setDeactivateExamContentContext(null);
                             setSelectedExam(item);
                             setShowDeactivateModal(true);
                           }}
@@ -14933,7 +15318,10 @@ export default function DashboardPage() {
           {showManageModal && selectedExam ? (
             <ModalShell
               title={`Gestionar preguntas: ${selectedExam.name}`}
-              onClose={() => setShowManageModal(false)}
+              onClose={() => {
+                setShowManageModal(false);
+                setManageExamContentContext(null);
+              }}
               panelClassName="w-full max-w-6xl max-h-[92vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-2xl sm:p-4"
             >
               <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
@@ -15186,7 +15574,10 @@ export default function DashboardPage() {
           {showGroupSettingsModal && selectedExam ? (
             <ModalShell
               title={`Configuracion repaso grupal: ${selectedExam.name}`}
-              onClose={() => setShowGroupSettingsModal(false)}
+              onClose={() => {
+                setShowGroupSettingsModal(false);
+                setPracticeSettingsContentContext(null);
+              }}
             >
               <div className="space-y-4">
                 <div>
@@ -15282,7 +15673,10 @@ export default function DashboardPage() {
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowGroupSettingsModal(false)}
+                  onClick={() => {
+                    setShowGroupSettingsModal(false);
+                    setPracticeSettingsContentContext(null);
+                  }}
                   className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                 >
                   Cancelar
@@ -15302,7 +15696,10 @@ export default function DashboardPage() {
           {showIndividualSettingsModal && selectedExam ? (
             <ModalShell
               title={`Configuracion repaso individual: ${selectedExam.name}`}
-              onClose={() => setShowIndividualSettingsModal(false)}
+              onClose={() => {
+                setShowIndividualSettingsModal(false);
+                setPracticeSettingsContentContext(null);
+              }}
             >
               <div className="space-y-4">
                 <div>
@@ -15380,7 +15777,10 @@ export default function DashboardPage() {
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowIndividualSettingsModal(false)}
+                  onClick={() => {
+                    setShowIndividualSettingsModal(false);
+                    setPracticeSettingsContentContext(null);
+                  }}
                   className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                 >
                   Cancelar
@@ -15478,16 +15878,33 @@ export default function DashboardPage() {
                     if (practiceIntent !== "restart" && (selectedExam.participantsCount ?? 1) > 1 && practiceStartMode === "group") {
                       if (selectedCanStartGroup) {
                         if (selectedGroupSessionActive && selectedExam.groupPracticeSessionId != null) {
-                          void onJoinGroupPractice(selectedExam);
+                          void onJoinGroupPractice(
+                            selectedExam,
+                            practiceOriginSection,
+                            activeExamContentContext ?? undefined,
+                          );
                         } else {
-                          void onCreateGroupPractice(selectedExam);
+                          void onCreateGroupPractice(
+                            selectedExam,
+                            practiceOriginSection,
+                            activeExamContentContext ?? undefined,
+                          );
                         }
                       } else {
-                        void onJoinGroupPractice(selectedExam);
+                        void onJoinGroupPractice(
+                          selectedExam,
+                          practiceOriginSection,
+                          activeExamContentContext ?? undefined,
+                        );
                       }
                       return;
                     }
-                    void onStartPractice(undefined, practiceIntent === "restart");
+                    void onStartPractice(
+                      undefined,
+                      practiceIntent === "restart",
+                      practiceOriginSection,
+                      activeExamContentContext ?? undefined,
+                    );
                   }}
                   disabled={startingPractice || groupPracticeLoading}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-70"
@@ -15526,6 +15943,7 @@ export default function DashboardPage() {
                 }
                 setShowRenameExamModal(false);
                 setRenameExamTarget(null);
+                setRenameExamContentContext(null);
               }}
             >
               <form
@@ -15560,6 +15978,7 @@ export default function DashboardPage() {
                       }
                       setShowRenameExamModal(false);
                       setRenameExamTarget(null);
+                      setRenameExamContentContext(null);
                     }}
                     className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                     disabled={renamingExam}
@@ -15579,7 +15998,13 @@ export default function DashboardPage() {
           ) : null}
 
           {showDeactivateModal && selectedExam ? (
-            <ModalShell title="Confirmar inactivacion" onClose={() => setShowDeactivateModal(false)}>
+            <ModalShell
+              title="Confirmar inactivacion"
+              onClose={() => {
+                setShowDeactivateModal(false);
+                setDeactivateExamContentContext(null);
+              }}
+            >
               <p className="text-sm text-slate-700">
                 Vas a inactivar el examen <span className="font-semibold">{selectedExam.name}</span>. Esta accion lo
                 sacara de la lista activa.
@@ -15587,14 +16012,17 @@ export default function DashboardPage() {
               <div className="mt-4 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setShowDeactivateModal(false)}
+                  onClick={() => {
+                    setShowDeactivateModal(false);
+                    setDeactivateExamContentContext(null);
+                  }}
                   className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                 >
                   Cancelar
                 </button>
                 <button
                   type="button"
-                  onClick={() => void onInactivateExam(selectedExam)}
+                  onClick={() => void onInactivateExam(selectedExam, deactivateExamContentContext)}
                   className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700"
                 >
                   Inactivar
@@ -18917,7 +19345,10 @@ export default function DashboardPage() {
               {showManageModal && selectedExam ? (
                 <ModalShell
                   title={`Gestionar preguntas: ${selectedExam.name}`}
-                  onClose={() => setShowManageModal(false)}
+                  onClose={() => {
+                    setShowManageModal(false);
+                    setManageExamContentContext(null);
+                  }}
                   panelClassName="w-full max-w-6xl max-h-[92vh] overflow-y-auto rounded-xl border border-slate-200 bg-white p-3 shadow-2xl sm:p-4"
                 >
                   <div className="grid gap-4 xl:grid-cols-[1.1fr_1fr]">
@@ -19170,7 +19601,10 @@ export default function DashboardPage() {
               {showGroupSettingsModal && selectedExam ? (
                 <ModalShell
                   title={`Configuracion repaso grupal: ${selectedExam.name}`}
-                  onClose={() => setShowGroupSettingsModal(false)}
+                  onClose={() => {
+                    setShowGroupSettingsModal(false);
+                    setPracticeSettingsContentContext(null);
+                  }}
                 >
                   <div className="space-y-4">
                     <div>
@@ -19266,7 +19700,10 @@ export default function DashboardPage() {
                   <div className="mt-4 flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowGroupSettingsModal(false)}
+                      onClick={() => {
+                        setShowGroupSettingsModal(false);
+                        setPracticeSettingsContentContext(null);
+                      }}
                       className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                     >
                       Cancelar
@@ -19286,7 +19723,10 @@ export default function DashboardPage() {
               {showIndividualSettingsModal && selectedExam ? (
                 <ModalShell
                   title={`Configuracion repaso individual: ${selectedExam.name}`}
-                  onClose={() => setShowIndividualSettingsModal(false)}
+                  onClose={() => {
+                    setShowIndividualSettingsModal(false);
+                    setPracticeSettingsContentContext(null);
+                  }}
                 >
                   <div className="space-y-4">
                     <div>
@@ -19364,7 +19804,10 @@ export default function DashboardPage() {
                   <div className="mt-4 flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowIndividualSettingsModal(false)}
+                      onClick={() => {
+                        setShowIndividualSettingsModal(false);
+                        setPracticeSettingsContentContext(null);
+                      }}
                       className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                     >
                       Cancelar
@@ -19390,6 +19833,7 @@ export default function DashboardPage() {
                     }
                     setShowRenameExamModal(false);
                     setRenameExamTarget(null);
+                    setRenameExamContentContext(null);
                   }}
                 >
                   <form
@@ -19424,6 +19868,7 @@ export default function DashboardPage() {
                           }
                           setShowRenameExamModal(false);
                           setRenameExamTarget(null);
+                          setRenameExamContentContext(null);
                         }}
                         className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
                         disabled={renamingExam}
@@ -19443,7 +19888,13 @@ export default function DashboardPage() {
               ) : null}
 
               {showDeactivateModal && selectedExam ? (
-                <ModalShell title="Confirmar inactivacion" onClose={() => setShowDeactivateModal(false)}>
+                <ModalShell
+                  title="Confirmar inactivacion"
+                  onClose={() => {
+                    setShowDeactivateModal(false);
+                    setDeactivateExamContentContext(null);
+                  }}
+                >
                   <p className="text-sm text-slate-700">
                     Vas a inactivar el examen <span className="font-semibold">{selectedExam.name}</span>. Esta accion lo
                     sacara de la lista activa.
@@ -19451,14 +19902,17 @@ export default function DashboardPage() {
                   <div className="mt-4 flex justify-end gap-2">
                     <button
                       type="button"
-                      onClick={() => setShowDeactivateModal(false)}
+                      onClick={() => {
+                        setShowDeactivateModal(false);
+                        setDeactivateExamContentContext(null);
+                      }}
                       className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
                     >
                       Cancelar
                     </button>
                     <button
                       type="button"
-                      onClick={() => void onInactivateExam(selectedExam)}
+                      onClick={() => void onInactivateExam(selectedExam, deactivateExamContentContext)}
                       className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700"
                     >
                       Inactivar
@@ -19762,6 +20216,7 @@ export default function DashboardPage() {
               onClose={() => {
                 setShowExamParticipantsModal(false);
                 setExamParticipantsTarget(null);
+                setExamParticipantsContentContext(null);
                 setExamParticipants([]);
                 setUpdatingExamParticipantUserId(null);
                 setRemoveExamParticipantPrompt(null);
@@ -20299,6 +20754,8 @@ function ModalShell({
     </div>
   );
 }
+
+
 
 
 
