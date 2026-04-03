@@ -4979,10 +4979,11 @@ export default function DashboardPage() {
     setPracticeIntent("start");
 
     try {
-      const summary = (await fetchJson(
-        `/api/v1/courses/${resolvedCourseId}/sessions/${sessionId}/contents/${content.id}/exam-summary?userId=${user.id}`,
-        user.token,
-      )) as ExamSummary;
+      const sourceExamId = resolveSourceExamId(content.sourceExamId);
+      if (sourceExamId == null) {
+        throw new Error("No se pudo resolver el examen anclado.");
+      }
+      const summary = (await fetchJson(`/api/v1/ia/exams/${sourceExamId}/summary?userId=${user.id}`, user.token)) as ExamSummary;
       if (!summary || typeof summary.id !== "number") {
         throw new Error("No se pudo resolver el examen anclado.");
       }
@@ -6203,12 +6204,7 @@ export default function DashboardPage() {
     setExamParticipantsLoading(true);
     setUpdatingExamParticipantUserId(null);
     try {
-      const data = contentContext
-        ? await fetchJson(
-            `/api/v1/courses/${contentContext.courseId}/sessions/${contentContext.sessionId}/contents/${contentContext.contentId}/exam-participants?userId=${user.id}`,
-            user.token,
-          )
-        : await fetchJson(`/api/v1/ia/exams/${exam.id}/participants?userId=${user.id}`, user.token);
+      const data = await fetchJson(`/api/v1/ia/exams/${exam.id}/participants?userId=${user.id}`, user.token);
       const participants = Array.isArray(data) ? data.filter((item) => isExamParticipantPayload(item)) : [];
       setExamParticipants(participants);
     } catch (participantsError) {
@@ -6238,16 +6234,15 @@ export default function DashboardPage() {
     if ((examParticipantsTarget.accessRole ?? "viewer").toLowerCase() !== "owner") {
       return;
     }
-    const resolvedContext =
+    const _resolvedContext =
       examParticipantsContentContext ??
       (shareTarget?.resourceType === "exam" && shareTarget.resourceId === examParticipantsTarget.id
         ? shareTarget.examContentContext ?? null
         : null);
+    void _resolvedContext;
     setUpdatingExamParticipantUserId(participant.userId);
     try {
-      const updatePath = resolvedContext
-        ? `/api/v1/courses/${resolvedContext.courseId}/sessions/${resolvedContext.sessionId}/contents/${resolvedContext.contentId}/exam-participants/${participant.userId}`
-        : `/api/v1/ia/exams/${examParticipantsTarget.id}/participants/${participant.userId}`;
+      const updatePath = `/api/v1/ia/exams/${examParticipantsTarget.id}/participants/${participant.userId}`;
       await patchJson(
         updatePath,
         user.token,
@@ -6259,15 +6254,13 @@ export default function DashboardPage() {
           canRenameExam: nextCanRenameExam,
         },
       );
-      const refreshedParticipantsPath = resolvedContext
-        ? `/api/v1/courses/${resolvedContext.courseId}/sessions/${resolvedContext.sessionId}/contents/${resolvedContext.contentId}/exam-participants?userId=${user.id}`
-        : `/api/v1/ia/exams/${examParticipantsTarget.id}/participants?userId=${user.id}`;
+      const refreshedParticipantsPath = `/api/v1/ia/exams/${examParticipantsTarget.id}/participants?userId=${user.id}`;
       const refreshedParticipantsPayload = await fetchJson(refreshedParticipantsPath, user.token);
       const refreshedParticipants = Array.isArray(refreshedParticipantsPayload)
         ? refreshedParticipantsPayload.filter((item) => isExamParticipantPayload(item))
         : [];
       setExamParticipants(refreshedParticipants);
-      await refreshExams({ preserveCurrentPayload: Boolean(resolvedContext) });
+      await refreshExams({ preserveCurrentPayload: Boolean(_resolvedContext) });
       setExamFeedback("Permisos del participante actualizados.", "success");
     } catch (updateError) {
       if (updateError instanceof Error) {
@@ -7228,6 +7221,35 @@ export default function DashboardPage() {
   }, [active, payload]);
 
   useEffect(() => {
+    if (!user || active !== "cursos") {
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+        if (cancelled || !Array.isArray(exams)) {
+          return;
+        }
+        setCourseExamCatalogById((previous) => {
+          const next = { ...previous };
+          for (const exam of exams) {
+            if (exam && typeof exam.id === "number") {
+              next[exam.id] = exam;
+            }
+          }
+          return next;
+        });
+      } catch {
+        // silencio
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, active]);
+
+  useEffect(() => {
     if (!user || active !== "cursos" || openedCourseId == null) {
       return;
     }
@@ -7874,10 +7896,8 @@ export default function DashboardPage() {
     examId: number,
     context?: { courseId: number; sessionId: number; contentId: number } | null,
   ) => {
-    const activeContext = context ?? activeExamContentContext;
-    if (activeContext) {
-      return `/api/v1/courses/${activeContext.courseId}/sessions/${activeContext.sessionId}/contents/${activeContext.contentId}/exam-practice`;
-    }
+    const _activeContext = context ?? activeExamContentContext;
+    void _activeContext;
     return `/api/v1/ia/exams/${examId}/practice`;
   };
 
@@ -7887,14 +7907,8 @@ export default function DashboardPage() {
     questionId?: number,
     context?: { courseId: number; sessionId: number; contentId: number } | null,
   ) => {
-    const activeContext = context ?? activeExamContentContext;
-    if (activeContext) {
-      const base = `/api/v1/courses/${activeContext.courseId}/sessions/${activeContext.sessionId}/contents/${activeContext.contentId}`;
-      if (operation === "list" || operation === "create") {
-        return `${base}/exam-questions`;
-      }
-      return `${base}/exam-questions/${questionId}`;
-    }
+    const _activeContext = context ?? activeExamContentContext;
+    void _activeContext;
     const base = `/api/v1/ia/exams/${examId}`;
     if (operation === "list") {
       return `${base}/manual`;
@@ -8287,9 +8301,9 @@ export default function DashboardPage() {
     }
 
     try {
-      const deletePath = contentContext
-        ? `/api/v1/courses/${contentContext.courseId}/sessions/${contentContext.sessionId}/contents/${contentContext.contentId}/exam?userId=${user.id}`
-        : `/api/v1/ia/exams/${exam.id}?userId=${user.id}`;
+      const _contentContext = contentContext;
+      void _contentContext;
+      const deletePath = `/api/v1/ia/exams/${exam.id}?userId=${user.id}`;
       await deleteJson(deletePath, user.token);
       await refreshExams({ preserveCurrentPayload: true });
       setCourseExamCatalogById((previous) => {
