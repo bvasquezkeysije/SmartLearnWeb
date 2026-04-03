@@ -6194,6 +6194,7 @@ export default function DashboardPage() {
     if (!user) {
       return;
     }
+    rememberExamActionContext(originSection, contentContext ?? null);
     ensureExamInteractiveSurface(originSection);
     setExamParticipantsTarget(exam);
     setExamParticipantsContentContext(contentContext ?? null);
@@ -7808,7 +7809,7 @@ export default function DashboardPage() {
   const ensureExamActionSurface = () => {
     // En curso anclado, las acciones del examen deben ejecutarse dentro del curso
     // sin forzar salto visual al modulo de examenes.
-    if (active === "cursos") {
+    if (active === "cursos" || activeExamContentContext != null || practiceOriginSection === "cursos") {
       return;
     }
     if (active !== "examenes") {
@@ -7916,7 +7917,6 @@ export default function DashboardPage() {
     questions: ExamQuestion[],
     contentContext?: { courseId: number; sessionId: number; contentId: number } | null,
   ) => {
-    ensureExamActionSurface();
     setSelectedExam(exam);
     setManagedExamQuestions(questions);
     setManageExamContentContext(contentContext ?? null);
