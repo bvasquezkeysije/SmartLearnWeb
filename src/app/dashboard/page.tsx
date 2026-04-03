@@ -1307,14 +1307,22 @@ function ContentSourceBadge({ kind }: { kind: ContentSourceBadgeKind }) {
   if (kind === "pdf") {
     return (
       <span className={`${commonClass} border-rose-200 bg-rose-50 text-rose-700`} title="PDF">
-        <span className="text-[9px] font-extrabold leading-none">PDF</span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 3h7l5 5v13H7z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14 3v5h5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 16h6M9 12h4" />
+        </svg>
       </span>
     );
   }
   if (kind === "word") {
     return (
       <span className={`${commonClass} border-blue-200 bg-blue-50 text-blue-700`} title="Word">
-        <span className="text-[9px] font-extrabold leading-none">W</span>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M7 3h7l5 5v13H7z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14 3v5h5" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="m9 11 1.3 6 1.7-4 1.7 4 1.3-6" />
+        </svg>
       </span>
     );
   }
@@ -4789,7 +4797,6 @@ export default function DashboardPage() {
     }
 
     setPracticeOriginSection("cursos");
-    setActive("examenes");
     setPracticeIntent("start");
 
     try {
@@ -7399,6 +7406,11 @@ export default function DashboardPage() {
   };
 
   const ensureExamActionSurface = () => {
+    // En curso anclado, las acciones del examen deben ejecutarse dentro del curso
+    // sin forzar salto visual al modulo de examenes.
+    if (active === "cursos") {
+      return;
+    }
     if (active !== "examenes") {
       setActive("examenes");
     }
