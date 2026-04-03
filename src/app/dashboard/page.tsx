@@ -6011,6 +6011,7 @@ export default function DashboardPage() {
     if (!user) {
       return;
     }
+    ensureExamInteractiveSurface(originSection);
     setExamParticipantsTarget(exam);
     setExamParticipants([]);
     setShowExamParticipantsModal(true);
@@ -7447,6 +7448,18 @@ export default function DashboardPage() {
     }
   };
 
+  const ensureExamInteractiveSurface = (
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
+    // Nota: mientras los modales/runners del examen viven en el layout de "examenes",
+    // en contexto de cursos forzamos esa superficie para garantizar funcionamiento.
+    if (originSection === "cursos" && active !== "examenes") {
+      setActive("examenes");
+      return;
+    }
+    ensureExamActionSurface();
+  };
+
   const openManageExamModal = (exam: ExamSummary, questions: ExamQuestion[]) => {
     ensureExamActionSurface();
     setSelectedExam(exam);
@@ -7731,6 +7744,7 @@ export default function DashboardPage() {
     if (!user) {
       return;
     }
+    ensureExamInteractiveSurface(originSection);
 
     try {
       const questions = (await fetchJson(
@@ -7950,7 +7964,7 @@ export default function DashboardPage() {
     originSection: "ia" | "cursos" | "examenes" = "examenes",
   ) => {
     setPracticeOriginSection(originSection);
-    ensureExamActionSurface();
+    ensureExamInteractiveSurface(originSection);
     setSelectedExam(exam);
     const defaults = resolvePracticeSettingsFromExam(exam);
     setPracticeFeedbackMode(defaults.practiceFeedbackMode);
@@ -7965,7 +7979,7 @@ export default function DashboardPage() {
     originSection: "ia" | "cursos" | "examenes" = "examenes",
   ) => {
     setPracticeOriginSection(originSection);
-    ensureExamActionSurface();
+    ensureExamInteractiveSurface(originSection);
     setSelectedExam(exam);
     const settings = await loadIndividualPracticeSettings(exam, true);
     setPracticeFeedbackMode(settings.practiceFeedbackMode);
@@ -8061,7 +8075,7 @@ export default function DashboardPage() {
       return;
     }
     setPracticeOriginSection(originSection);
-    ensureExamActionSurface();
+    ensureExamInteractiveSurface(originSection);
 
     const individualSettings = await loadIndividualPracticeSettings(exam);
     const effectiveFeedbackMode = individualSettings.practiceFeedbackMode;
@@ -8174,7 +8188,7 @@ export default function DashboardPage() {
       return;
     }
     setPracticeOriginSection(originSection);
-    ensureExamActionSurface();
+    ensureExamInteractiveSurface(originSection);
 
     suppressGroupRoomClosedModalRef.current = false;
     setSelectedExam(exam);
@@ -8237,7 +8251,7 @@ export default function DashboardPage() {
       return;
     }
     setPracticeOriginSection(originSection);
-    ensureExamActionSurface();
+    ensureExamInteractiveSurface(originSection);
 
     suppressGroupRoomClosedModalRef.current = false;
     setSelectedExam(exam);
