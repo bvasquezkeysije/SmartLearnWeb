@@ -8819,6 +8819,9 @@ export default function DashboardPage() {
       setShowPracticeModal(false);
       setShowManageModal(false);
       setManageExamContentContext(null);
+      // El runner de repaso vive en la superficie de examenes.
+      // Mantenemos el contexto anclado en estado, pero abrimos la UI interactiva.
+      setActive("examenes");
       setShowPracticeRunnerModal(true);
 
       savePracticeDraft(
@@ -8909,6 +8912,9 @@ export default function DashboardPage() {
       setShowManageModal(false);
       setManageExamContentContext(null);
       setShowPracticeRunnerModal(false);
+      // La sala grupal se renderiza en la superficie de examenes.
+      // El contexto de curso se conserva en practiceOrigin/activeExamContentContext.
+      setActive("examenes");
       setShowGroupPracticeRunnerModal(true);
       setPracticeFeedbackStatus(null);
       resetPracticeInputState();
@@ -8995,6 +9001,9 @@ export default function DashboardPage() {
       setShowManageModal(false);
       setManageExamContentContext(null);
       setShowPracticeRunnerModal(false);
+      // La sala grupal se renderiza en la superficie de examenes.
+      // El contexto de curso se conserva en practiceOrigin/activeExamContentContext.
+      setActive("examenes");
       setShowGroupPracticeRunnerModal(true);
       setPracticeFeedbackStatus(null);
       resetPracticeInputState();
