@@ -7387,6 +7387,14 @@ export default function DashboardPage() {
             contentId: options.contentContext.content.id,
           }
         : undefined;
+    const onAnchoredExamActionClick = (event: MouseEvent<HTMLButtonElement>) => {
+      if (actionOrigin !== "cursos" || !resolvedContentContext) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      keepAnchoredExamOnCourseSurface(resolvedContentContext);
+    };
 
     return (
       <article className="min-w-0 rounded-lg border border-slate-300 bg-slate-50 p-3">
@@ -7397,7 +7405,10 @@ export default function DashboardPage() {
               {canRenameExam ? (
                 <button
                   type="button"
-                  onClick={() => void onRenameExamName(item, actionOrigin, resolvedContentContext ?? null)}
+                  onClick={(event) => {
+                    onAnchoredExamActionClick(event);
+                    void onRenameExamName(item, actionOrigin, resolvedContentContext ?? null);
+                  }}
                   className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
                   aria-label="Editar nombre del examen"
                   title="Editar nombre del examen"
@@ -7430,7 +7441,8 @@ export default function DashboardPage() {
           {canEditQuestions ? (
             <button
               type="button"
-              onClick={() =>
+              onClick={(event) => {
+                onAnchoredExamActionClick(event);
                 void onManageExamQuestions(
                   item,
                   actionOrigin,
@@ -7441,8 +7453,8 @@ export default function DashboardPage() {
                         contentId: options.contentContext.content.id,
                       }
                     : undefined,
-                )
-              }
+                );
+              }}
               className="inline-flex items-center gap-2 rounded-lg bg-[#374151] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1F2937]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7458,7 +7470,8 @@ export default function DashboardPage() {
           ) : null}
           <button
             type="button"
-            onClick={() => {
+            onClick={(event) => {
+                onAnchoredExamActionClick(event);
                 rememberExamActionContext(actionOrigin, resolvedContentContext ?? null);
                 setPracticeIntent("start");
                 void onStartPractice(item, false, actionOrigin, resolvedContentContext);
@@ -7473,7 +7486,8 @@ export default function DashboardPage() {
           {showGroupPracticeButton ? (
             <button
               type="button"
-              onClick={() => {
+              onClick={(event) => {
+                onAnchoredExamActionClick(event);
                 if (isAnotherGroupButtonLoading) {
                   return;
                 }
@@ -7507,13 +7521,14 @@ export default function DashboardPage() {
           ) : null}
           <button
             type="button"
-            onClick={() =>
+            onClick={(event) => {
+              onAnchoredExamActionClick(event);
               void onOpenExamParticipantsModal(
                 item,
                 actionOrigin,
                 resolvedContentContext,
-              )
-            }
+              );
+            }}
             className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#4B5563] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#374151]"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7526,7 +7541,10 @@ export default function DashboardPage() {
           </button>
           <button
             type="button"
-            onClick={() => void openIndividualPracticeSettingsModal(item, actionOrigin, resolvedContentContext)}
+            onClick={(event) => {
+              onAnchoredExamActionClick(event);
+              void openIndividualPracticeSettingsModal(item, actionOrigin, resolvedContentContext);
+            }}
             className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#38BDF8] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#0EA5E9]"
           >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7538,7 +7556,10 @@ export default function DashboardPage() {
           {canEditSettings ? (
             <button
               type="button"
-              onClick={() => openGroupPracticeSettingsModal(item, actionOrigin, resolvedContentContext)}
+              onClick={(event) => {
+                onAnchoredExamActionClick(event);
+                openGroupPracticeSettingsModal(item, actionOrigin, resolvedContentContext);
+              }}
               className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#3B82F6] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#2563EB]"
             >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
@@ -7551,7 +7572,10 @@ export default function DashboardPage() {
           {canShareExam ? (
             <button
               type="button"
-              onClick={() => onOpenShareModal("exam", item.id, item.name, resolvedContentContext)}
+              onClick={(event) => {
+                onAnchoredExamActionClick(event);
+                onOpenShareModal("exam", item.id, item.name, resolvedContentContext);
+              }}
               title="Compartir"
               aria-label="Compartir"
               className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-[#F9C200] text-white hover:bg-[#E0AD00]"
@@ -7568,7 +7592,8 @@ export default function DashboardPage() {
           {isOwner ? (
             <button
               type="button"
-              onClick={() => {
+              onClick={(event) => {
+                onAnchoredExamActionClick(event);
                 ensureExamInteractiveSurface(actionOrigin);
                 setDeactivateExamContentContext(resolvedContentContext ?? null);
                 setSelectedExam(item);
@@ -7590,7 +7615,10 @@ export default function DashboardPage() {
           {options?.allowVisibilityToggle ? (
             <button
               type="button"
-              onClick={() => void onToggleAnchoredExamVisibility(options.contentContext!.content)}
+              onClick={(event) => {
+                onAnchoredExamActionClick(event);
+                void onToggleAnchoredExamVisibility(options.contentContext!.content);
+              }}
               disabled={Boolean(anchoredExamVisibilityLoadingById[item.id])}
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-60"
             >
@@ -7893,6 +7921,16 @@ export default function DashboardPage() {
     setActiveExamContentContext(null);
   };
 
+  const keepAnchoredExamOnCourseSurface = (context: { courseId: number; sessionId: number; contentId: number }) => {
+    rememberExamActionContext("cursos", context);
+    setOpenedCourseId(context.courseId);
+    setOpenedCourseTab("curso");
+    setExpandedSessionId(context.sessionId);
+    if (active !== "cursos") {
+      setActive("cursos");
+    }
+  };
+
   const restorePracticeOriginSurface = () => {
     if (practiceOriginSection === "ia") {
       setActive("ia");
@@ -7911,6 +7949,22 @@ export default function DashboardPage() {
     }
     setActive("examenes");
   };
+
+  useEffect(() => {
+    if (!activeExamContentContext) {
+      return;
+    }
+    if (practiceOriginSection !== "cursos") {
+      return;
+    }
+    if (active !== "examenes") {
+      return;
+    }
+    setOpenedCourseId(activeExamContentContext.courseId);
+    setOpenedCourseTab("curso");
+    setExpandedSessionId(activeExamContentContext.sessionId);
+    setActive("cursos");
+  }, [active, activeExamContentContext, practiceOriginSection]);
 
   const openManageExamModal = (
     exam: ExamSummary,
