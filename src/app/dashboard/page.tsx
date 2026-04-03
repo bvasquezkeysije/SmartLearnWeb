@@ -3424,6 +3424,17 @@ export default function DashboardPage() {
     setCourseMessageType(type);
   };
 
+  const setExamFeedbackInContext = (
+    message: string,
+    type: "info" | "success" | "error",
+    originSection?: "ia" | "cursos" | "examenes",
+  ) => {
+    setExamFeedback(message, type);
+    if ((originSection ?? practiceOriginSection) === "cursos" || active === "cursos") {
+      setCourseFeedback(message, type);
+    }
+  };
+
   const setSalaFeedback = (message: string, type: "info" | "success" | "error") => {
     setSalaMessage(message);
     setSalaMessageType(type);
@@ -5993,7 +6004,10 @@ export default function DashboardPage() {
     }
   };
 
-  const onOpenExamParticipantsModal = async (exam: ExamSummary) => {
+  const onOpenExamParticipantsModal = async (
+    exam: ExamSummary,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
     if (!user) {
       return;
     }
@@ -6008,9 +6022,9 @@ export default function DashboardPage() {
       setExamParticipants(participants);
     } catch (participantsError) {
       if (participantsError instanceof Error) {
-        setExamFeedback(participantsError.message, "error");
+        setExamFeedbackInContext(participantsError.message, "error", originSection);
       } else {
-        setExamFeedback("No se pudieron cargar los participantes del examen.", "error");
+        setExamFeedbackInContext("No se pudieron cargar los participantes del examen.", "error", originSection);
       }
       setShowExamParticipantsModal(false);
       setExamParticipantsTarget(null);
@@ -7083,6 +7097,7 @@ export default function DashboardPage() {
     const isAnotherGroupButtonLoading =
       groupPracticeLoading && groupPracticeLoadingExamId != null && groupPracticeLoadingExamId !== item.id;
     const fromCourseContent = options?.contentContext != null;
+    const actionOrigin: "ia" | "cursos" | "examenes" = fromCourseContent ? "cursos" : "examenes";
 
     return (
       <article className="min-w-0 rounded-lg border border-slate-300 bg-slate-50 p-3">
@@ -7124,7 +7139,11 @@ export default function DashboardPage() {
 
         <div className="mt-3 flex flex-wrap gap-2">
           {canEditQuestions ? (
-            <button type="button" onClick={() => void onManageExamQuestions(item)} className="inline-flex items-center gap-2 rounded-lg bg-[#374151] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1F2937]">
+            <button
+              type="button"
+              onClick={() => void onManageExamQuestions(item, actionOrigin)}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#374151] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1F2937]"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
                 <path d="M4 19.5V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14.5" />
                 <path d="M8 7h8" />
@@ -7139,9 +7158,9 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={() => {
-              setPracticeOriginSection(fromCourseContent ? "cursos" : "examenes");
+              setPracticeOriginSection(actionOrigin);
               setPracticeIntent("start");
-              void onStartPractice(item, false);
+              void onStartPractice(item, false, actionOrigin);
             }}
             className="inline-flex items-center gap-2 rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
           >
@@ -7157,17 +7176,17 @@ export default function DashboardPage() {
                 if (isAnotherGroupButtonLoading) {
                   return;
                 }
-                setPracticeOriginSection(fromCourseContent ? "cursos" : "examenes");
+                setPracticeOriginSection(actionOrigin);
                 if (canStartGroupPractice) {
                   if (groupSessionActive) {
-                    void onJoinGroupPractice(item);
+                    void onJoinGroupPractice(item, actionOrigin);
                   } else {
-                    void onCreateGroupPractice(item);
+                    void onCreateGroupPractice(item, actionOrigin);
                   }
                   return;
                 }
                 if (canJoinGroupPractice) {
-                  void onJoinGroupPractice(item);
+                  void onJoinGroupPractice(item, actionOrigin);
                 }
               }}
               disabled={isGroupButtonLoading}
@@ -7185,7 +7204,11 @@ export default function DashboardPage() {
               )}
             </button>
           ) : null}
-          <button type="button" onClick={() => void onOpenExamParticipantsModal(item)} className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#4B5563] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#374151]">
+          <button
+            type="button"
+            onClick={() => void onOpenExamParticipantsModal(item, actionOrigin)}
+            className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#4B5563] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#374151]"
+          >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
               <circle cx="9" cy="7" r="4" />
@@ -7194,7 +7217,11 @@ export default function DashboardPage() {
             </svg>
             Participantes
           </button>
-          <button type="button" onClick={() => void openIndividualPracticeSettingsModal(item)} className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#38BDF8] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#0EA5E9]">
+          <button
+            type="button"
+            onClick={() => void openIndividualPracticeSettingsModal(item, actionOrigin)}
+            className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#38BDF8] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#0EA5E9]"
+          >
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
               <circle cx="12" cy="12" r="3" />
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -7202,7 +7229,11 @@ export default function DashboardPage() {
             Configuracion individual
           </button>
           {canEditSettings ? (
-            <button type="button" onClick={() => openGroupPracticeSettingsModal(item)} className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#3B82F6] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#2563EB]">
+            <button
+              type="button"
+              onClick={() => openGroupPracticeSettingsModal(item, actionOrigin)}
+              className="inline-flex items-center gap-2 whitespace-normal rounded-lg bg-[#3B82F6] px-4 py-2 text-center text-sm font-semibold text-white hover:bg-[#2563EB]"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4" aria-hidden="true">
                 <circle cx="12" cy="12" r="3" />
                 <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -7693,7 +7724,10 @@ export default function DashboardPage() {
     }
   };
 
-  const onManageExamQuestions = async (exam: ExamSummary) => {
+  const onManageExamQuestions = async (
+    exam: ExamSummary,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
     if (!user) {
       return;
     }
@@ -7704,12 +7738,12 @@ export default function DashboardPage() {
         user.token,
       )) as ExamQuestion[];
       openManageExamModal(exam, questions);
-      setExamFeedback(`Examen '${exam.name}': ${questions.length} preguntas cargadas.`, "info");
+      setExamFeedbackInContext(`Examen '${exam.name}': ${questions.length} preguntas cargadas.`, "info", originSection);
     } catch (manageError) {
       if (manageError instanceof Error) {
-        setExamFeedback(manageError.message, "error");
+        setExamFeedbackInContext(manageError.message, "error", originSection);
       } else {
-        setExamFeedback("No se pudo cargar las preguntas del examen.", "error");
+        setExamFeedbackInContext("No se pudo cargar las preguntas del examen.", "error", originSection);
       }
     }
   };
@@ -7911,7 +7945,11 @@ export default function DashboardPage() {
     }
   };
 
-  const openGroupPracticeSettingsModal = (exam: ExamSummary) => {
+  const openGroupPracticeSettingsModal = (
+    exam: ExamSummary,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
+    setPracticeOriginSection(originSection);
     ensureExamActionSurface();
     setSelectedExam(exam);
     const defaults = resolvePracticeSettingsFromExam(exam);
@@ -7922,7 +7960,11 @@ export default function DashboardPage() {
     setShowGroupSettingsModal(true);
   };
 
-  const openIndividualPracticeSettingsModal = async (exam: ExamSummary) => {
+  const openIndividualPracticeSettingsModal = async (
+    exam: ExamSummary,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
+    setPracticeOriginSection(originSection);
     ensureExamActionSurface();
     setSelectedExam(exam);
     const settings = await loadIndividualPracticeSettings(exam, true);
@@ -8009,11 +8051,16 @@ export default function DashboardPage() {
     }
   };
 
-  const onStartPractice = async (examOverride?: ExamSummary, restart = false) => {
+  const onStartPractice = async (
+    examOverride?: ExamSummary,
+    restart = false,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
     const exam = examOverride ?? selectedExam;
     if (!user || !exam) {
       return;
     }
+    setPracticeOriginSection(originSection);
     ensureExamActionSurface();
 
     const individualSettings = await loadIndividualPracticeSettings(exam);
@@ -8034,7 +8081,7 @@ export default function DashboardPage() {
       )) as ExamQuestion[];
 
       if (questions.length === 0) {
-        setExamFeedback("Este examen no tiene preguntas para iniciar repaso.", "error");
+        setExamFeedbackInContext("Este examen no tiene preguntas para iniciar repaso.", "error", originSection);
         return;
       }
 
@@ -8095,33 +8142,38 @@ export default function DashboardPage() {
       }
 
       if (restart) {
-        setExamFeedback(
+        setExamFeedbackInContext(
           hadOpenDraft
             ? `Repaso reiniciado con ${orderedQuestions.length} preguntas.`
             : `Repaso iniciado con ${orderedQuestions.length} preguntas.`,
           "success",
+          originSection,
         );
       } else if (hadOpenDraft) {
-        setExamFeedback("Repaso retomado desde tu ultimo avance.", "success");
+        setExamFeedbackInContext("Repaso retomado desde tu ultimo avance.", "success", originSection);
       } else {
-        setExamFeedback(`Repaso iniciado con ${orderedQuestions.length} preguntas.`, "success");
+        setExamFeedbackInContext(`Repaso iniciado con ${orderedQuestions.length} preguntas.`, "success", originSection);
       }
     } catch (practiceError) {
       if (practiceError instanceof Error) {
-        setExamFeedback(practiceError.message, "error");
+        setExamFeedbackInContext(practiceError.message, "error", originSection);
       } else {
-        setExamFeedback("No se pudo iniciar el repaso.", "error");
+        setExamFeedbackInContext("No se pudo iniciar el repaso.", "error", originSection);
       }
     } finally {
       setStartingPractice(false);
     }
   };
 
-  const onJoinGroupPractice = async (examOverride?: ExamSummary) => {
+  const onJoinGroupPractice = async (
+    examOverride?: ExamSummary,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
     const exam = examOverride ?? selectedExam;
     if (!user || !exam) {
       return;
     }
+    setPracticeOriginSection(originSection);
     ensureExamActionSurface();
 
     suppressGroupRoomClosedModalRef.current = false;
@@ -8139,14 +8191,15 @@ export default function DashboardPage() {
       setShowGroupPracticeRunnerModal(true);
       setPracticeFeedbackStatus(null);
       resetPracticeInputState();
-      setExamFeedback("Entraste a la sala de repaso grupal.", "success");
+      setExamFeedbackInContext("Entraste a la sala de repaso grupal.", "success", originSection);
     } catch (groupError) {
       if (groupError instanceof Error) {
         const rawMessage = groupError.message || "";
         if (rawMessage.toLowerCase().includes("recurso no encontrado")) {
-          setExamFeedback(
+          setExamFeedbackInContext(
             "No se encontro el endpoint de repaso grupal. Reinicia SmartLearnApi.",
             "error",
+            originSection,
           );
         } else if (rawMessage.toLowerCase().includes("no hay repaso grupal creado")) {
           // BUGFIX: Si el usuario dueño hace click en "Regresar al repaso" luego de 20s de inactividad,
@@ -8158,16 +8211,16 @@ export default function DashboardPage() {
             exam.ownerUserId === user.id;
 
           if (isCreator) {
-             setExamFeedback("La sesion expiro por inactividad. Creando una nueva...", "error");
-             void onCreateGroupPractice(exam);
+             setExamFeedbackInContext("La sesion expiro por inactividad. Creando una nueva...", "error", originSection);
+             void onCreateGroupPractice(exam, originSection);
           } else {
-             setExamFeedback("El repaso grupal acabo o caduco por inactividad. Pide al creador que inicie uno nuevo.", "error");
+             setExamFeedbackInContext("El repaso grupal acabo o caduco por inactividad. Pide al creador que inicie uno nuevo.", "error", originSection);
           }
         } else {
-          setExamFeedback(rawMessage, "error");
+          setExamFeedbackInContext(rawMessage, "error", originSection);
         }
       } else {
-        setExamFeedback("No se pudo entrar al repaso grupal.", "error");
+        setExamFeedbackInContext("No se pudo entrar al repaso grupal.", "error", originSection);
       }
     } finally {
       setGroupPracticeLoading(false);
@@ -8175,11 +8228,15 @@ export default function DashboardPage() {
     }
   };
 
-  const onCreateGroupPractice = async (examOverride?: ExamSummary) => {
+  const onCreateGroupPractice = async (
+    examOverride?: ExamSummary,
+    originSection: "ia" | "cursos" | "examenes" = "examenes",
+  ) => {
     const exam = examOverride ?? selectedExam;
     if (!user || !exam) {
       return;
     }
+    setPracticeOriginSection(originSection);
     ensureExamActionSurface();
 
     suppressGroupRoomClosedModalRef.current = false;
@@ -8197,15 +8254,16 @@ export default function DashboardPage() {
       setShowGroupPracticeRunnerModal(true);
       setPracticeFeedbackStatus(null);
       resetPracticeInputState();
-      setExamFeedback("Repaso grupal creado. Esperando participantes.", "success");
+      setExamFeedbackInContext("Repaso grupal creado. Esperando participantes.", "success", originSection);
       await refreshExams();
     } catch (groupError) {
       if (groupError instanceof Error) {
         const rawMessage = groupError.message || "";
         if (rawMessage.toLowerCase().includes("recurso no encontrado")) {
-          setExamFeedback(
+          setExamFeedbackInContext(
             "No se encontro el endpoint de repaso grupal. Reinicia SmartLearnApi para cargar /practice/group/*.",
             "error",
+            originSection,
           );
         } else if (rawMessage.toLowerCase().includes("ya existe un repaso grupal creado")) {
           setExamFeedback("Ya existe un repaso grupal activo. Usa 'Unirse a repaso grupal'.", "error");
@@ -10813,7 +10871,7 @@ export default function DashboardPage() {
       const addingContentWeeks = addingContentSession?.weeks ?? [];
       return (
         <div className="flex w-full flex-col gap-4">
-          <DataCard title="Cursos">
+          <DataCard title="Cursos" flat={Boolean(openedCourse)}>
             {!openedCourse ? (
             <div className="space-y-3">
               <div className="flex flex-wrap items-center justify-center gap-2">
@@ -10947,34 +11005,33 @@ export default function DashboardPage() {
 
             <div className="mt-4 space-y-3">
               {openedCourse ? (
-                <section className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-wrap items-center justify-end gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenedCourseId(null);
-                        setOpenedCourseTab("curso");
-                        setExpandedSessionId(null);
-                        setShowCreateCourseSessionModal(false);
-                        setShowEditCourseSessionModal(false);
-                        setEditingCourseSessionId(null);
-                        setEditingCourseSessionName("");
-                        setEditingCourseSessionWeeklyContent("");
-                        setCourseSessionName("");
-                        setCourseSessionWeeklyContent("");
-                        setCourseParticipantIdentifier("");
-                        setCourseParticipantRole("viewer");
-                        resetCourseCompetencyEditor();
-                        resetSessionContentEditor();
-                      }}
-                      className="rounded-lg bg-[#004aad] px-3 py-2 text-sm font-semibold text-white hover:bg-[#003b88]"
-                    >
-                      Volver a cursos
-                    </button>
-                  </div>
-
+                <section className="space-y-3">
                   <article className="rounded-xl border border-slate-200 bg-white p-4">
-                    <p className="text-xl font-semibold text-[#004aad]">{openedCourse.name}</p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xl font-semibold text-[#004aad]">{openedCourse.name}</p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOpenedCourseId(null);
+                          setOpenedCourseTab("curso");
+                          setExpandedSessionId(null);
+                          setShowCreateCourseSessionModal(false);
+                          setShowEditCourseSessionModal(false);
+                          setEditingCourseSessionId(null);
+                          setEditingCourseSessionName("");
+                          setEditingCourseSessionWeeklyContent("");
+                          setCourseSessionName("");
+                          setCourseSessionWeeklyContent("");
+                          setCourseParticipantIdentifier("");
+                          setCourseParticipantRole("viewer");
+                          resetCourseCompetencyEditor();
+                          resetSessionContentEditor();
+                        }}
+                        className="rounded-lg bg-[#004aad] px-3 py-2 text-sm font-semibold text-white hover:bg-[#003b88]"
+                      >
+                        Volver a cursos
+                      </button>
+                    </div>
                     <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
                       {[
                         { key: "curso", label: "Curso" },
@@ -11062,8 +11119,13 @@ export default function DashboardPage() {
                         <div className="space-y-2">
                           {orderedOpenedCourseSessions.map((session) => (
                             <article key={session.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                                <div className="flex items-center justify-between gap-2">
-                                  <p className="text-sm font-semibold text-[#004aad]">{formatSessionName(session.name)}</p>
+                                <div className="flex items-start justify-between gap-2">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-[#004aad]">{formatSessionName(session.name)}</p>
+                                    {session.weeklyContent?.trim() ? (
+                                      <p className="mt-0.5 text-xs text-indigo-700">{session.weeklyContent.trim()}</p>
+                                    ) : null}
+                                  </div>
                                   <div className="flex items-center gap-1">
                                     {openedCourseIsOwner ? (
                                       <>
@@ -19601,7 +19663,10 @@ function MetricCard({ title, value }: { title: string; value: string }) {
   );
 }
 
-function DataCard({ title, children }: { title: string; children: ReactNode }) {
+function DataCard({ title, children, flat = false }: { title: string; children: ReactNode; flat?: boolean }) {
+  if (flat) {
+    return <>{children}</>;
+  }
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
       <h2 className="mb-3 text-lg font-semibold text-slate-900">{title}</h2>
