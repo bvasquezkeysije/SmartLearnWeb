@@ -1248,6 +1248,107 @@ function extractYoutubeVideoId(urlValue: string | null): string | null {
   }
 }
 
+type ContentSourceBadgeKind = "youtube" | "drive" | "pdf" | "word" | "video" | "link" | "default";
+
+function detectContentSourceBadge(
+  contentTypeRaw: string | null | undefined,
+  externalLinkRaw: string | null | undefined,
+): ContentSourceBadgeKind {
+  const contentType = (contentTypeRaw ?? "").toLowerCase().trim();
+  const externalLink = (externalLinkRaw ?? "").toLowerCase().trim();
+
+  if (contentType === "pdf") {
+    return "pdf";
+  }
+  if (contentType === "word") {
+    return "word";
+  }
+  if (contentType === "video") {
+    if (externalLink.includes("youtube.com") || externalLink.includes("youtu.be")) {
+      return "youtube";
+    }
+    if (externalLink.includes("drive.google.com")) {
+      return "drive";
+    }
+    return "video";
+  }
+  if (externalLink.includes("drive.google.com")) {
+    return "drive";
+  }
+  if (externalLink.includes("youtube.com") || externalLink.includes("youtu.be")) {
+    return "youtube";
+  }
+  if (externalLink) {
+    return "link";
+  }
+  return "default";
+}
+
+function ContentSourceBadge({ kind }: { kind: ContentSourceBadgeKind }) {
+  const commonClass = "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md border";
+  if (kind === "youtube") {
+    return (
+      <span className={`${commonClass} border-rose-200 bg-rose-50 text-rose-600`} title="YouTube">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+          <path d="M23 12s0-4-1-6c-.5-1.3-1.5-2.3-2.8-2.8C17 2 12 2 12 2s-5 0-7.2 1.2A4.2 4.2 0 0 0 2 6c-1 2-1 6-1 6s0 4 1 6c.5 1.3 1.5 2.3 2.8 2.8C7 22 12 22 12 22s5 0 7.2-1.2A4.2 4.2 0 0 0 22 18c1-2 1-6 1-6ZM10 16V8l6 4-6 4Z" />
+        </svg>
+      </span>
+    );
+  }
+  if (kind === "drive") {
+    return (
+      <span className={`${commonClass} border-emerald-200 bg-emerald-50 text-emerald-600`} title="Google Drive">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="h-3.5 w-3.5">
+          <path d="M7.3 3h9.4l4.7 8.1-4.7 8.2H7.3l-4.7-8.2L7.3 3Zm1.2 2-3.5 6.1 3.5 6.1h7l3.5-6.1L15.5 5h-7Z" />
+        </svg>
+      </span>
+    );
+  }
+  if (kind === "pdf") {
+    return (
+      <span className={`${commonClass} border-rose-200 bg-rose-50 text-rose-700`} title="PDF">
+        <span className="text-[9px] font-extrabold leading-none">PDF</span>
+      </span>
+    );
+  }
+  if (kind === "word") {
+    return (
+      <span className={`${commonClass} border-blue-200 bg-blue-50 text-blue-700`} title="Word">
+        <span className="text-[9px] font-extrabold leading-none">W</span>
+      </span>
+    );
+  }
+  if (kind === "video") {
+    return (
+      <span className={`${commonClass} border-violet-200 bg-violet-50 text-violet-700`} title="Video">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+          <rect x="3" y="5" width="14" height="14" rx="2" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="m10 9 4 3-4 3V9Z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="m17 10 4-2v8l-4-2" />
+        </svg>
+      </span>
+    );
+  }
+  if (kind === "link") {
+    return (
+      <span className={`${commonClass} border-sky-200 bg-sky-50 text-sky-700`} title="Enlace">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10 13a5 5 0 0 1 0-7l1-1a5 5 0 1 1 7 7l-1 1" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14 11a5 5 0 0 1 0 7l-1 1a5 5 0 0 1-7-7l1-1" />
+        </svg>
+      </span>
+    );
+  }
+  return (
+    <span className={`${commonClass} border-slate-200 bg-slate-50 text-slate-600`} title="Contenido">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5">
+        <rect x="4" y="3" width="16" height="18" rx="2" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M8 8h8M8 12h8M8 16h5" />
+      </svg>
+    </span>
+  );
+}
+
 function MenuItemIcon({ itemKey }: { itemKey: string }) {
   const iconClass = "h-4 w-4 shrink-0";
   const baseProps = {
@@ -11110,9 +11211,14 @@ export default function DashboardPage() {
                                                         className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"
                                                       >
                                                         <div className="flex items-start justify-between gap-2">
-                                                          <p className="font-semibold text-slate-800">
-                                                            {content.title?.trim() || "Sin nombre"} - {typeLabel}
-                                                          </p>
+                                                          <div className="min-w-0">
+                                                            <p className="flex items-center gap-2 font-semibold text-slate-800">
+                                                              <ContentSourceBadge kind={detectContentSourceBadge(content.type, content.externalLink)} />
+                                                              <span className="min-w-0 break-words">
+                                                                {content.title?.trim() || "Sin nombre"} - {typeLabel}
+                                                              </span>
+                                                            </p>
+                                                          </div>
                                                             {openedCourseIsOwner ? (
                                                               <div className="flex items-center gap-1">
                                                                 <button
