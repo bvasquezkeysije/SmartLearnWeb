@@ -3089,7 +3089,7 @@ export default function DashboardPage() {
           return;
         }
         if (active === "examenes") {
-          setPayload(await fetchJson(`/api/v1/ia/exams?userId=${userId}`, token));
+          setPayload(await fetchJson(`/api/v1/exams?userId=${userId}`, token));
           return;
         }
         if (active === "cursos") {
@@ -3323,7 +3323,7 @@ export default function DashboardPage() {
         clearShareQuery();
 
         if (result.resourceType === "exam") {
-          const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+          const exams = (await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[];
           setClaimedExamInvitePrompt({
             examId: result.resourceId,
             examName: result.resourceName?.trim() || "Examen",
@@ -4983,7 +4983,7 @@ export default function DashboardPage() {
       if (sourceExamId == null) {
         throw new Error("No se pudo resolver el examen anclado.");
       }
-      const summary = (await fetchJson(`/api/v1/ia/exams/${sourceExamId}/summary?userId=${user.id}`, user.token)) as ExamSummary;
+      const summary = (await fetchJson(`/api/v1/exams/${sourceExamId}/summary?userId=${user.id}`, user.token)) as ExamSummary;
       if (!summary || typeof summary.id !== "number") {
         throw new Error("No se pudo resolver el examen anclado.");
       }
@@ -5016,7 +5016,7 @@ export default function DashboardPage() {
     setAnchoredExamVisibilityLoadingById((previous) => ({ ...previous, [examId]: true }));
 
     try {
-      await patchJson(`/api/v1/ia/exams/${examId}/list-visibility`, user.token, {
+      await patchJson(`/api/v1/exams/${examId}/list-visibility`, user.token, {
         userId: user.id,
         visible: targetVisible,
       });
@@ -6011,7 +6011,7 @@ export default function DashboardPage() {
       const participantsPath =
         examContentContext != null
           ? `/api/v1/courses/${examContentContext.courseId}/sessions/${examContentContext.sessionId}/contents/${examContentContext.contentId}/exam-participants?userId=${user.id}`
-          : `/api/v1/ia/exams/${resourceId}/participants?userId=${user.id}`;
+          : `/api/v1/exams/${resourceId}/participants?userId=${user.id}`;
       fetchJson(participantsPath, user.token)
         .then((data) => {
           const participants = Array.isArray(data) ? data.filter((item) => isExamParticipantPayload(item)) : [];
@@ -6148,7 +6148,7 @@ export default function DashboardPage() {
       if (shareTarget.resourceType === "exam") {
         const participantsPath = shareTarget.examContentContext
           ? `/api/v1/courses/${shareTarget.examContentContext.courseId}/sessions/${shareTarget.examContentContext.sessionId}/contents/${shareTarget.examContentContext.contentId}/exam-participants?userId=${user.id}`
-          : `/api/v1/ia/exams/${shareTarget.resourceId}/participants?userId=${user.id}`;
+          : `/api/v1/exams/${shareTarget.resourceId}/participants?userId=${user.id}`;
         const participantsData = await fetchJson(participantsPath, user.token);
         const participants = Array.isArray(participantsData)
           ? participantsData.filter((item) => isExamParticipantPayload(item))
@@ -6204,7 +6204,7 @@ export default function DashboardPage() {
     setExamParticipantsLoading(true);
     setUpdatingExamParticipantUserId(null);
     try {
-      const data = await fetchJson(`/api/v1/ia/exams/${exam.id}/participants?userId=${user.id}`, user.token);
+      const data = await fetchJson(`/api/v1/exams/${exam.id}/participants?userId=${user.id}`, user.token);
       const participants = Array.isArray(data) ? data.filter((item) => isExamParticipantPayload(item)) : [];
       setExamParticipants(participants);
     } catch (participantsError) {
@@ -6242,7 +6242,7 @@ export default function DashboardPage() {
     void _resolvedContext;
     setUpdatingExamParticipantUserId(participant.userId);
     try {
-      const updatePath = `/api/v1/ia/exams/${examParticipantsTarget.id}/participants/${participant.userId}`;
+      const updatePath = `/api/v1/exams/${examParticipantsTarget.id}/participants/${participant.userId}`;
       await patchJson(
         updatePath,
         user.token,
@@ -6254,7 +6254,7 @@ export default function DashboardPage() {
           canRenameExam: nextCanRenameExam,
         },
       );
-      const refreshedParticipantsPath = `/api/v1/ia/exams/${examParticipantsTarget.id}/participants?userId=${user.id}`;
+      const refreshedParticipantsPath = `/api/v1/exams/${examParticipantsTarget.id}/participants?userId=${user.id}`;
       const refreshedParticipantsPayload = await fetchJson(refreshedParticipantsPath, user.token);
       const refreshedParticipants = Array.isArray(refreshedParticipantsPayload)
         ? refreshedParticipantsPayload.filter((item) => isExamParticipantPayload(item))
@@ -6289,7 +6289,7 @@ export default function DashboardPage() {
     try {
       const deletePath = resolvedContext
         ? `/api/v1/courses/${resolvedContext.courseId}/sessions/${resolvedContext.sessionId}/contents/${resolvedContext.contentId}/exam-participants/${participant.userId}?requesterUserId=${user.id}`
-        : `/api/v1/ia/exams/${examId}/participants/${participant.userId}?requesterUserId=${user.id}`;
+        : `/api/v1/exams/${examId}/participants/${participant.userId}?requesterUserId=${user.id}`;
       await deleteJson(deletePath, user.token);
       setExamParticipants((current) => current.filter((item) => item.userId !== participant.userId));
       setShareSelectedRecipientIds((current) => current.filter((id) => id !== participant.userId));
@@ -6466,7 +6466,7 @@ export default function DashboardPage() {
 
       const updatedResourceType = (updated.resourceType ?? notification.resourceType ?? "").trim().toLowerCase();
       if (updatedResourceType === "exam") {
-        const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+        const exams = (await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[];
         const examName = updated.resourceName?.trim() || notification.resourceName?.trim() || "Examen";
         setClaimedExamInvitePrompt({
           examId: updated.resourceId ?? notification.resourceId,
@@ -6584,7 +6584,7 @@ export default function DashboardPage() {
 
     if (resourceType === "exam") {
       try {
-        const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+        const exams = (await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[];
         setPayload(exams);
         setActive("examenes");
         const examName = notification.resourceName?.trim() || "Examen";
@@ -6644,7 +6644,7 @@ export default function DashboardPage() {
     const nextExams =
       claimedExamInvitePrompt.cachedExams.length > 0
         ? claimedExamInvitePrompt.cachedExams
-        : ((await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[]);
+        : ((await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[]);
     setPayload(nextExams);
     setActive("examenes");
     setExamFeedback(claimedExamInvitePrompt.message, "success");
@@ -7176,7 +7176,7 @@ export default function DashboardPage() {
     if (!user) {
       return [];
     }
-    const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+    const exams = (await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[];
     setCourseExamCatalogById((previous) => {
       const next = { ...previous };
       for (const exam of exams) {
@@ -7227,7 +7227,7 @@ export default function DashboardPage() {
     let cancelled = false;
     void (async () => {
       try {
-        const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+        const exams = (await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[];
         if (cancelled || !Array.isArray(exams)) {
           return;
         }
@@ -7305,7 +7305,7 @@ export default function DashboardPage() {
             missingVisibilityIds.map(
               (examId) =>
                 fetchJson(
-                  `/api/v1/ia/exams/${examId}/list-visibility?userId=${user.id}`,
+                  `/api/v1/exams/${examId}/list-visibility?userId=${user.id}`,
                   user.token,
                 ) as Promise<ExamListVisibilityResponse>,
             ),
@@ -7337,7 +7337,7 @@ export default function DashboardPage() {
                 }
               }
               return (await fetchJson(
-                `/api/v1/ia/exams/${examId}/summary?userId=${user.id}`,
+                `/api/v1/exams/${examId}/summary?userId=${user.id}`,
                 user.token,
               )) as ExamSummary;
             }),
@@ -7768,7 +7768,7 @@ export default function DashboardPage() {
 
         const basePath = restoredContentContext
           ? `/api/v1/courses/${restoredContentContext.courseId}/sessions/${restoredContentContext.sessionId}/contents/${restoredContentContext.contentId}/exam-practice`
-          : `/api/v1/ia/exams/${targetExam.id}/practice`;
+          : `/api/v1/exams/${targetExam.id}/practice`;
         const state = (await fetchJson(
           `${basePath}/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
           user.token,
@@ -7806,7 +7806,7 @@ export default function DashboardPage() {
     const refreshHandle = window.setInterval(() => {
       void (async () => {
         try {
-          const exams = (await fetchJson(`/api/v1/ia/exams?userId=${user.id}`, user.token)) as ExamSummary[];
+          const exams = (await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[];
           setPayload(exams);
         } catch {
           // silencio para polling
@@ -7898,7 +7898,7 @@ export default function DashboardPage() {
   ) => {
     const _activeContext = context ?? activeExamContentContext;
     void _activeContext;
-    return `/api/v1/ia/exams/${examId}/practice`;
+    return `/api/v1/exams/${examId}/practice`;
   };
 
   const resolveExamManualEndpoint = (
@@ -7909,7 +7909,7 @@ export default function DashboardPage() {
   ) => {
     const _activeContext = context ?? activeExamContentContext;
     void _activeContext;
-    const base = `/api/v1/ia/exams/${examId}`;
+    const base = `/api/v1/exams/${examId}`;
     if (operation === "list") {
       return `${base}/manual`;
     }
@@ -8014,7 +8014,7 @@ export default function DashboardPage() {
     try {
       const renamePath = renameExamContentContext
         ? `/api/v1/courses/${renameExamContentContext.courseId}/sessions/${renameExamContentContext.sessionId}/contents/${renameExamContentContext.contentId}/exam/name`
-        : `/api/v1/ia/exams/${renameExamTarget.id}/name`;
+        : `/api/v1/exams/${renameExamTarget.id}/name`;
       const updatedExam = (await patchJson(renamePath, user.token, {
         userId: user.id,
         examName: nextName,
@@ -8166,7 +8166,7 @@ export default function DashboardPage() {
     setExamMessage("");
 
     try {
-      const created = (await postJson("/api/v1/ia/exams/manual", user.token, {
+      const created = (await postJson("/api/v1/exams/manual", user.token, {
         userId: user.id,
         manualExamName: manualExamName.trim(),
       })) as ExamSummary;
@@ -8200,7 +8200,7 @@ export default function DashboardPage() {
       formData.append("examName", uploadExamName.trim());
       formData.append("examFile", uploadExamFile);
 
-      await postFormData("/api/v1/ia/exams", user.token, formData);
+      await postFormData("/api/v1/exams", user.token, formData);
       await refreshExams();
 
       setUploadExamName("");
@@ -8225,7 +8225,7 @@ export default function DashboardPage() {
     }
 
     try {
-      const response = await fetch(`/api/v1/ia/exams/format/v2?ts=${Date.now()}`, {
+      const response = await fetch(`/api/v1/exams/format/v2?ts=${Date.now()}`, {
         cache: "no-store",
         headers: {
           Authorization: `Bearer ${user.token}`,
@@ -8280,7 +8280,7 @@ export default function DashboardPage() {
             `/api/v1/courses/${contentContext.courseId}/sessions/${contentContext.sessionId}/contents/${contentContext.contentId}/exam-questions?userId=${user.id}`,
             user.token,
           )
-        : fetchJson(`/api/v1/ia/exams/${exam.id}/manual?userId=${user.id}`, user.token))) as ExamQuestion[];
+        : fetchJson(`/api/v1/exams/${exam.id}/manual?userId=${user.id}`, user.token))) as ExamQuestion[];
       openManageExamModal(exam, questions, contentContext ?? null);
       setExamFeedbackInContext(`Examen '${exam.name}': ${questions.length} preguntas cargadas.`, "info", originSection);
     } catch (manageError) {
@@ -8303,7 +8303,7 @@ export default function DashboardPage() {
     try {
       const _contentContext = contentContext;
       void _contentContext;
-      const deletePath = `/api/v1/ia/exams/${exam.id}?userId=${user.id}`;
+      const deletePath = `/api/v1/exams/${exam.id}?userId=${user.id}`;
       await deleteJson(deletePath, user.token);
       await refreshExams({ preserveCurrentPayload: true });
       setCourseExamCatalogById((previous) => {

@@ -100,7 +100,7 @@ export default function ExamPracticePage() {
         const fullUser: SessionUser = { ...parsed, token };
         setUser(fullUser);
 
-        const examList = (await fetchJson(`/api/v1/ia/exams?userId=${fullUser.id}`, token)) as ExamSummary[];
+        const examList = (await fetchJson(`/api/v1/exams?userId=${fullUser.id}`, token)) as ExamSummary[];
         const selectedExam = examList.find((item) => item.id === examId) ?? null;
 
         if (!selectedExam) {
@@ -120,7 +120,7 @@ export default function ExamPracticePage() {
         setProgressMode(configuredProgressMode);
 
         const loadedQuestions = (await fetchJson(
-          `/api/v1/ia/exams/${selectedExam.id}/manual?userId=${fullUser.id}`,
+          `/api/v1/exams/${selectedExam.id}/manual?userId=${fullUser.id}`,
           token,
         )) as ExamQuestion[];
 
