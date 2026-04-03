@@ -56,11 +56,26 @@ export default function ExamPracticePage() {
   const examId = Number(params.examId);
   const origin = (searchParams.get("origin") ?? "").trim().toLowerCase();
   const courseId = Number(searchParams.get("courseId") ?? "");
+  const sessionId = Number(searchParams.get("sessionId") ?? "");
+  const contentId = Number(searchParams.get("contentId") ?? "");
   const encodedOriginUrl = searchParams.get("originUrl");
   const hasValidCourseId = Number.isFinite(courseId) && courseId > 0;
+  const hasValidSessionId = Number.isFinite(sessionId) && sessionId > 0;
+  const hasValidContentId = Number.isFinite(contentId) && contentId > 0;
+  const courseBackParams = new URLSearchParams({
+    section: "cursos",
+    courseId: String(Math.trunc(courseId)),
+    courseTab: "curso",
+  });
+  if (hasValidSessionId) {
+    courseBackParams.set("sessionId", String(Math.trunc(sessionId)));
+  }
+  if (hasValidContentId) {
+    courseBackParams.set("contentId", String(Math.trunc(contentId)));
+  }
   const defaultBackUrl =
     origin === "cursos" && hasValidCourseId
-      ? `/dashboard?section=cursos&courseId=${Math.trunc(courseId)}&courseTab=curso`
+      ? `/dashboard?${courseBackParams.toString()}`
       : "/dashboard?section=examenes";
   const backUrl = encodedOriginUrl ? decodeURIComponent(encodedOriginUrl) : defaultBackUrl;
   const backLabel = origin === "cursos" ? "Volver al curso" : "Volver a examenes";
@@ -465,35 +480,11 @@ export default function ExamPracticePage() {
 }
 
 async function fetchJson(path: string, token: string) {
-  const legacyPath = path.startsWith("/api/v1/exams")
-    ? path.replace(/^\/api\/v1\/exams(\/|$)/, "/api/v1/ia/exams$1")
-    : null;
-
-  let response: Response;
-  try {
-    response = await fetch(path, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-  } catch (error) {
-    if (!legacyPath) {
-      throw error;
-    }
-    response = await fetch(legacyPath, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-  }
-
-  if ((response.status === 404 || response.status === 405) && legacyPath) {
-    response = await fetch(legacyPath, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    });
-  }
+  const response = await fetch(path, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
 
   const data = (await response.json()) as { error?: string; message?: string };
   if (!response.ok) {

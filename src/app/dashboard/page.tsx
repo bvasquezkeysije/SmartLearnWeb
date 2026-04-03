@@ -7394,7 +7394,6 @@ export default function DashboardPage() {
     const isAnotherGroupButtonLoading =
       groupPracticeLoading && groupPracticeLoadingExamId != null && groupPracticeLoadingExamId !== item.id;
     const fromCourseContent = options?.contentContext != null;
-    const actionOrigin: "ia" | "cursos" | "examenes" = fromCourseContent ? "cursos" : "examenes";
     const resolvedCourseIdForContent =
       fromCourseContent && options?.contentContext
         ? (options.contentContext.courseId ??
@@ -7402,13 +7401,14 @@ export default function DashboardPage() {
           openedCourseId)
         : null;
     const resolvedContentContext =
-      actionOrigin === "cursos" && resolvedCourseIdForContent != null && options?.contentContext
+      fromCourseContent && resolvedCourseIdForContent != null && options?.contentContext
         ? {
             courseId: resolvedCourseIdForContent,
             sessionId: options.contentContext.sessionId,
             contentId: options.contentContext.content.id,
           }
         : undefined;
+    const actionOrigin: "ia" | "cursos" | "examenes" = resolvedContentContext ? "cursos" : "examenes";
     const onAnchoredExamActionClick = (event: MouseEvent<HTMLButtonElement>) => {
       if (actionOrigin !== "cursos" || !resolvedContentContext) {
         return;
@@ -7896,8 +7896,10 @@ export default function DashboardPage() {
     examId: number,
     context?: { courseId: number; sessionId: number; contentId: number } | null,
   ) => {
-    const _activeContext = context ?? activeExamContentContext;
-    void _activeContext;
+    const activeContext = context ?? activeExamContentContext;
+    if (activeContext) {
+      return `/api/v1/courses/${activeContext.courseId}/sessions/${activeContext.sessionId}/contents/${activeContext.contentId}/exam-practice`;
+    }
     return `/api/v1/exams/${examId}/practice`;
   };
 
@@ -20587,7 +20589,7 @@ async function readApiPayload(response: Response): Promise<ApiResponsePayload> {
 }
 
 async function fetchJson(path: string, token: string): Promise<unknown> {
-  const response = await fetchWithExamApiFallback(path, {
+  const response = await fetch(resolveApiUrl(path), {
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -20605,7 +20607,7 @@ async function fetchJson(path: string, token: string): Promise<unknown> {
 }
 
 async function postJson(path: string, token: string, body: unknown): Promise<unknown> {
-  const response = await fetchWithExamApiFallback(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -20626,7 +20628,7 @@ async function postJson(path: string, token: string, body: unknown): Promise<unk
 }
 
 async function patchJson(path: string, token: string, body: unknown): Promise<unknown> {
-  const response = await fetchWithExamApiFallback(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -20646,7 +20648,7 @@ async function patchJson(path: string, token: string, body: unknown): Promise<un
 }
 
 async function putJson(path: string, token: string, body: unknown): Promise<unknown> {
-  const response = await fetchWithExamApiFallback(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -20666,7 +20668,7 @@ async function putJson(path: string, token: string, body: unknown): Promise<unkn
 }
 
 async function postFormData(path: string, token: string, formData: FormData): Promise<unknown> {
-  const response = await fetchWithExamApiFallback(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -20685,7 +20687,7 @@ async function postFormData(path: string, token: string, formData: FormData): Pr
 }
 
 async function deleteJson(path: string, token: string) {
-  const response = await fetchWithExamApiFallback(path, {
+  const response = await fetch(resolveApiUrl(path), {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -20731,38 +20733,6 @@ function resolveApiUrl(path: string): string {
     return `${normalizedBase}${normalizedPath}`;
   }
   return path;
-}
-
-function resolveLegacyExamApiPath(path: string): string | null {
-  if (!path.startsWith("/api/v1/exams")) {
-    return null;
-  }
-  return path.replace(/^\/api\/v1\/exams(\/|$)/, "/api/v1/ia/exams$1");
-}
-
-async function fetchWithExamApiFallback(path: string, init: RequestInit): Promise<Response> {
-  const primaryUrl = resolveApiUrl(path);
-  const legacyPath = resolveLegacyExamApiPath(path);
-  const legacyUrl = legacyPath ? resolveApiUrl(legacyPath) : null;
-
-  try {
-    const primaryResponse = await fetch(primaryUrl, init);
-    if (!legacyUrl) {
-      return primaryResponse;
-    }
-
-    // Durante despliegues parciales, algunos nodos aun exponen /api/v1/ia/exams.
-    if (primaryResponse.status === 404 || primaryResponse.status === 405) {
-      const legacyResponse = await fetch(legacyUrl, init);
-      return legacyResponse;
-    }
-    return primaryResponse;
-  } catch (error) {
-    if (!legacyUrl) {
-      throw error;
-    }
-    return fetch(legacyUrl, init);
-  }
 }
 
 function MetricCard({ title, value }: { title: string; value: string }) {
