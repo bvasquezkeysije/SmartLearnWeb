@@ -7409,6 +7409,22 @@ export default function DashboardPage() {
           }
         : undefined;
     const actionOrigin: "ia" | "cursos" | "examenes" = resolvedContentContext ? "cursos" : "examenes";
+    const ensureAnchoredContextOrReport = (event: MouseEvent<HTMLButtonElement>) => {
+      if (!fromCourseContent) {
+        return resolvedContentContext;
+      }
+      if (resolvedContentContext) {
+        return resolvedContentContext;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setExamFeedbackInContext(
+        "No se pudo resolver el contexto del examen anclado (curso/sesion/contenido). Recarga el curso e intenta otra vez.",
+        "error",
+        "cursos",
+      );
+      return undefined;
+    };
     const onAnchoredExamActionClick = (event: MouseEvent<HTMLButtonElement>) => {
       if (actionOrigin !== "cursos" || !resolvedContentContext) {
         return;
@@ -7493,10 +7509,21 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={(event) => {
+                const anchoredContext = ensureAnchoredContextOrReport(event);
+                if (fromCourseContent && !anchoredContext) {
+                  return;
+                }
                 onAnchoredExamActionClick(event);
-                rememberExamActionContext(actionOrigin, resolvedContentContext ?? null);
+                const effectiveOrigin: "ia" | "cursos" | "examenes" = anchoredContext ? "cursos" : actionOrigin;
+                console.info("[ANCHOR_DEBUG][INDIVIDUAL_CLICK]", {
+                  examId: item.id,
+                  fromCourseContent,
+                  actionOrigin: effectiveOrigin,
+                  contentContext: anchoredContext ?? null,
+                });
+                rememberExamActionContext(effectiveOrigin, anchoredContext ?? null);
                 setPracticeIntent("start");
-                void onStartPractice(item, false, actionOrigin, resolvedContentContext);
+                void onStartPractice(item, false, effectiveOrigin, anchoredContext);
               }}
             className="inline-flex items-center gap-2 rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
           >
@@ -7509,21 +7536,35 @@ export default function DashboardPage() {
             <button
               type="button"
               onClick={(event) => {
+                const anchoredContext = ensureAnchoredContextOrReport(event);
+                if (fromCourseContent && !anchoredContext) {
+                  return;
+                }
                 onAnchoredExamActionClick(event);
                 if (isAnotherGroupButtonLoading) {
                   return;
                 }
-                rememberExamActionContext(actionOrigin, resolvedContentContext ?? null);
+                const effectiveOrigin: "ia" | "cursos" | "examenes" = anchoredContext ? "cursos" : actionOrigin;
+                console.info("[ANCHOR_DEBUG][GROUP_CLICK]", {
+                  examId: item.id,
+                  fromCourseContent,
+                  actionOrigin: effectiveOrigin,
+                  contentContext: anchoredContext ?? null,
+                  canStartGroupPractice,
+                  canJoinGroupPractice,
+                  groupSessionActive,
+                });
+                rememberExamActionContext(effectiveOrigin, anchoredContext ?? null);
                 if (canStartGroupPractice) {
                   if (groupSessionActive) {
-                    void onJoinGroupPractice(item, actionOrigin, resolvedContentContext);
+                    void onJoinGroupPractice(item, effectiveOrigin, anchoredContext);
                   } else {
-                    void onCreateGroupPractice(item, actionOrigin, resolvedContentContext);
+                    void onCreateGroupPractice(item, effectiveOrigin, anchoredContext);
                   }
                   return;
                 }
                 if (canJoinGroupPractice) {
-                  void onJoinGroupPractice(item, actionOrigin, resolvedContentContext);
+                  void onJoinGroupPractice(item, effectiveOrigin, anchoredContext);
                 }
               }}
               disabled={isGroupButtonLoading}
@@ -7769,8 +7810,9 @@ export default function DashboardPage() {
         const basePath = restoredContentContext
           ? `/api/v1/courses/${restoredContentContext.courseId}/sessions/${restoredContentContext.sessionId}/contents/${restoredContentContext.contentId}/exam-practice`
           : `/api/v1/exams/${targetExam.id}/practice`;
+        const stateParamName = restoredContentContext ? "sessionGroupId" : "sessionId";
         const state = (await fetchJson(
-          `${basePath}/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
+          `${basePath}/group/state?userId=${user.id}&${stateParamName}=${sessionId}&ts=${Date.now()}`,
           user.token,
         )) as ExamGroupState;
         const status = (state.status ?? "").toLowerCase();
@@ -8652,10 +8694,22 @@ export default function DashboardPage() {
     if (!user || !exam) {
       return;
     }
-    rememberExamActionContext(originSection, contentContext ?? null);
+    const effectiveContentContext =
+      originSection === "cursos"
+        ? (contentContext ?? activeExamContentContext ?? null)
+        : (contentContext ?? null);
+    if (originSection === "cursos" && !effectiveContentContext) {
+      setExamFeedbackInContext(
+        "No se pudo resolver el contexto del curso para iniciar el repaso anclado.",
+        "error",
+        originSection,
+      );
+      return;
+    }
+    rememberExamActionContext(originSection, effectiveContentContext);
     ensureExamInteractiveSurface(originSection);
 
-    const individualSettings = await loadIndividualPracticeSettings(exam, false, contentContext);
+    const individualSettings = await loadIndividualPracticeSettings(exam, false, effectiveContentContext ?? undefined);
     const effectiveFeedbackMode = individualSettings.practiceFeedbackMode;
     const effectiveOrderMode = individualSettings.practiceOrderMode;
     const effectiveProgressMode = individualSettings.practiceProgressMode;
@@ -8668,7 +8722,7 @@ export default function DashboardPage() {
     try {
       const hadOpenDraft = hasOpenPracticeDraft(exam.id);
       const questions = (await fetchJson(
-        `${resolveExamManualEndpoint(exam.id, "list", undefined, contentContext)}?userId=${user.id}`,
+        `${resolveExamManualEndpoint(exam.id, "list", undefined, effectiveContentContext ?? undefined)}?userId=${user.id}`,
         user.token,
       )) as ExamQuestion[];
 
@@ -8705,7 +8759,16 @@ export default function DashboardPage() {
       }
 
       if (shouldRegisterAttempt) {
-        await postJson(`${resolveExamPracticeBasePath(exam.id, contentContext)}/start`, user.token, {
+        const practiceBasePath = resolveExamPracticeBasePath(exam.id, effectiveContentContext);
+        const startEndpoint = `${practiceBasePath}/start`;
+        console.info("[ANCHOR_DEBUG][INDIVIDUAL_ENDPOINT]", {
+          examId: exam.id,
+          originSection,
+          contentContext: effectiveContentContext,
+          basePath: practiceBasePath,
+          endpoint: startEndpoint,
+        });
+        await postJson(startEndpoint, user.token, {
           userId: user.id,
         });
       }
@@ -8767,7 +8830,19 @@ export default function DashboardPage() {
     if (!user || !exam) {
       return;
     }
-    rememberExamActionContext(originSection, contentContext ?? null);
+    const effectiveContentContext =
+      originSection === "cursos"
+        ? (contentContext ?? activeExamContentContext ?? null)
+        : (contentContext ?? null);
+    if (originSection === "cursos" && !effectiveContentContext) {
+      setExamFeedbackInContext(
+        "No se pudo resolver el contexto del curso para entrar al repaso grupal anclado.",
+        "error",
+        originSection,
+      );
+      return;
+    }
+    rememberExamActionContext(originSection, effectiveContentContext);
     ensureExamInteractiveSurface(originSection);
 
     suppressGroupRoomClosedModalRef.current = false;
@@ -8775,7 +8850,16 @@ export default function DashboardPage() {
     setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
     try {
-      const state = (await postJson(`${resolveExamPracticeBasePath(exam.id, contentContext)}/group/join`, user.token, {
+      const practiceBasePath = resolveExamPracticeBasePath(exam.id, effectiveContentContext);
+      const joinEndpoint = `${practiceBasePath}/group/join`;
+      console.info("[ANCHOR_DEBUG][GROUP_ENDPOINT_JOIN]", {
+        examId: exam.id,
+        originSection,
+        contentContext: effectiveContentContext,
+        basePath: practiceBasePath,
+        endpoint: joinEndpoint,
+      });
+      const state = (await postJson(joinEndpoint, user.token, {
         userId: user.id,
       })) as ExamGroupState;
       setGroupPracticeState(state);
@@ -8807,7 +8891,7 @@ export default function DashboardPage() {
 
           if (isCreator) {
              setExamFeedbackInContext("La sesion expiro por inactividad. Creando una nueva...", "error", originSection);
-             void onCreateGroupPractice(exam, originSection, contentContext);
+             void onCreateGroupPractice(exam, originSection, effectiveContentContext ?? undefined);
           } else {
              setExamFeedbackInContext("El repaso grupal acabo o caduco por inactividad. Pide al creador que inicie uno nuevo.", "error", originSection);
           }
@@ -8832,7 +8916,19 @@ export default function DashboardPage() {
     if (!user || !exam) {
       return;
     }
-    rememberExamActionContext(originSection, contentContext ?? null);
+    const effectiveContentContext =
+      originSection === "cursos"
+        ? (contentContext ?? activeExamContentContext ?? null)
+        : (contentContext ?? null);
+    if (originSection === "cursos" && !effectiveContentContext) {
+      setExamFeedbackInContext(
+        "No se pudo resolver el contexto del curso para crear la sala grupal anclada.",
+        "error",
+        originSection,
+      );
+      return;
+    }
+    rememberExamActionContext(originSection, effectiveContentContext);
     ensureExamInteractiveSurface(originSection);
 
     suppressGroupRoomClosedModalRef.current = false;
@@ -8840,7 +8936,16 @@ export default function DashboardPage() {
     setGroupPracticeLoadingExamId(exam.id);
     setGroupPracticeLoading(true);
     try {
-      const state = (await postJson(`${resolveExamPracticeBasePath(exam.id, contentContext)}/group/create`, user.token, {
+      const practiceBasePath = resolveExamPracticeBasePath(exam.id, effectiveContentContext);
+      const createEndpoint = `${practiceBasePath}/group/create`;
+      console.info("[ANCHOR_DEBUG][GROUP_ENDPOINT_CREATE]", {
+        examId: exam.id,
+        originSection,
+        contentContext: effectiveContentContext,
+        basePath: practiceBasePath,
+        endpoint: createEndpoint,
+      });
+      const state = (await postJson(createEndpoint, user.token, {
         userId: user.id,
       })) as ExamGroupState;
       setGroupPracticeState((previous) => mergeGroupState(previous, state));
@@ -9540,7 +9645,7 @@ export default function DashboardPage() {
         groupStatePollInFlightRef.current = true;
         try {
           const state = (await fetchJson(
-            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${user.id}&sessionId=${sessionId}&ts=${Date.now()}`,
+            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${user.id}&${activeExamContentContext ? "sessionGroupId" : "sessionId"}=${sessionId}&ts=${Date.now()}`,
             user.token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, state));
@@ -9841,7 +9946,7 @@ export default function DashboardPage() {
       void (async () => {
         try {
           const freshState = (await fetchJson(
-            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${userId}&sessionId=${sessionId}&ts=${Date.now()}`,
+            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${userId}&${activeExamContentContext ? "sessionGroupId" : "sessionId"}=${sessionId}&ts=${Date.now()}`,
             token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, freshState));
