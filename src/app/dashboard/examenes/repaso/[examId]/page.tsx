@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 type SessionUser = {
   id: number;
@@ -51,8 +51,19 @@ function resolveCorrectOption(question: ExamQuestion): "a" | "b" | "c" | "d" {
 
 export default function ExamPracticePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const params = useParams<{ examId: string }>();
   const examId = Number(params.examId);
+  const origin = (searchParams.get("origin") ?? "").trim().toLowerCase();
+  const courseId = Number(searchParams.get("courseId") ?? "");
+  const encodedOriginUrl = searchParams.get("originUrl");
+  const hasValidCourseId = Number.isFinite(courseId) && courseId > 0;
+  const defaultBackUrl =
+    origin === "cursos" && hasValidCourseId
+      ? `/dashboard?section=cursos&courseId=${Math.trunc(courseId)}&courseTab=curso`
+      : "/dashboard?section=examenes";
+  const backUrl = encodedOriginUrl ? decodeURIComponent(encodedOriginUrl) : defaultBackUrl;
+  const backLabel = origin === "cursos" ? "Volver al curso" : "Volver a examenes";
 
   const [user, setUser] = useState<SessionUser | null>(null);
   const [exam, setExam] = useState<ExamSummary | null>(null);
@@ -242,10 +253,10 @@ export default function ExamPracticePage() {
           <p className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>
           <button
             type="button"
-            onClick={() => router.push("/dashboard?section=examenes")}
+            onClick={() => router.push(backUrl)}
             className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
           >
-            Volver a examenes
+            {backLabel}
           </button>
         </div>
       </div>
@@ -263,10 +274,10 @@ export default function ExamPracticePage() {
             </div>
             <button
               type="button"
-              onClick={() => router.push("/dashboard?section=examenes")}
+              onClick={() => router.push(backUrl)}
               className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
             >
-              Volver a examenes
+              {backLabel}
             </button>
           </div>
         </section>
@@ -295,7 +306,7 @@ export default function ExamPracticePage() {
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => router.push("/dashboard?section=examenes")}
+                onClick={() => router.push(backUrl)}
                 className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
               >
                 Cerrar
@@ -413,7 +424,7 @@ export default function ExamPracticePage() {
             <div className="flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => router.push("/dashboard?section=examenes")}
+                onClick={() => router.push(backUrl)}
                 className="rounded-lg border border-slate-400 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100"
               >
                 Guardar y salir

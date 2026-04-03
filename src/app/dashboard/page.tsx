@@ -4816,20 +4816,10 @@ export default function DashboardPage() {
         user.token,
         { userId: user.id },
       )) as CourseSessionContentPracticeStartResponse;
-
-      const exams = await refreshExams();
-      const targetExam = exams.find((item) => item.id === startResponse.examId);
-      if (!targetExam) {
-        setExamFeedback("No se encontro el examen anclado en tu lista.", "error");
-        return;
-      }
-      if ((targetExam.participantsCount ?? 1) <= 1) {
-        await onStartPractice(targetExam, false);
-        return;
-      }
-      setSelectedExam(targetExam);
-      setPracticeStartMode("personal");
-      setShowPracticeModal(true);
+      const originUrl = `/dashboard?section=cursos&courseId=${resolvedCourseId}&courseTab=curso`;
+      router.push(
+        `/dashboard/examenes/repaso/${startResponse.examId}?origin=cursos&courseId=${resolvedCourseId}&originUrl=${encodeURIComponent(originUrl)}`,
+      );
     } catch (startError) {
       if (startError instanceof Error) {
         setExamFeedback(startError.message, "error");
@@ -7099,6 +7089,10 @@ export default function DashboardPage() {
       groupPracticeLoading && groupPracticeLoadingExamId != null && groupPracticeLoadingExamId !== item.id;
     const fromCourseContent = options?.contentContext != null;
     const actionOrigin: "ia" | "cursos" | "examenes" = fromCourseContent ? "cursos" : "examenes";
+    const resolvedCourseIdForContent =
+      fromCourseContent && options?.contentContext
+        ? (resolveCourseIdBySession(options.contentContext.sessionId) ?? openedCourseId)
+        : null;
 
     return (
       <article className="min-w-0 rounded-lg border border-slate-300 bg-slate-50 p-3">
@@ -7161,6 +7155,13 @@ export default function DashboardPage() {
             onClick={() => {
               setPracticeOriginSection(actionOrigin);
               setPracticeIntent("start");
+              if (actionOrigin === "cursos" && resolvedCourseIdForContent != null) {
+                const originUrl = `/dashboard?section=cursos&courseId=${resolvedCourseIdForContent}&courseTab=curso`;
+                router.push(
+                  `/dashboard/examenes/repaso/${item.id}?origin=cursos&courseId=${resolvedCourseIdForContent}&originUrl=${encodeURIComponent(originUrl)}`,
+                );
+                return;
+              }
               void onStartPractice(item, false, actionOrigin);
             }}
             className="inline-flex items-center gap-2 rounded-lg bg-[#2563EB] px-4 py-2 text-sm font-semibold text-white hover:bg-[#1D4ED8]"
