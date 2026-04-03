@@ -7950,22 +7950,6 @@ export default function DashboardPage() {
     setActive("examenes");
   };
 
-  useEffect(() => {
-    if (!activeExamContentContext) {
-      return;
-    }
-    if (practiceOriginSection !== "cursos") {
-      return;
-    }
-    if (active !== "examenes") {
-      return;
-    }
-    setOpenedCourseId(activeExamContentContext.courseId);
-    setOpenedCourseTab("curso");
-    setExpandedSessionId(activeExamContentContext.sessionId);
-    setActive("cursos");
-  }, [active, activeExamContentContext, practiceOriginSection]);
-
   const openManageExamModal = (
     exam: ExamSummary,
     questions: ExamQuestion[],
