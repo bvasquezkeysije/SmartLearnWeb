@@ -465,11 +465,35 @@ export default function ExamPracticePage() {
 }
 
 async function fetchJson(path: string, token: string) {
-  const response = await fetch(path, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
+  const legacyPath = path.startsWith("/api/v1/exams")
+    ? path.replace(/^\/api\/v1\/exams(\/|$)/, "/api/v1/ia/exams$1")
+    : null;
+
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  } catch (error) {
+    if (!legacyPath) {
+      throw error;
+    }
+    response = await fetch(legacyPath, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
+
+  if ((response.status === 404 || response.status === 405) && legacyPath) {
+    response = await fetch(legacyPath, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+  }
 
   const data = (await response.json()) as { error?: string; message?: string };
   if (!response.ok) {

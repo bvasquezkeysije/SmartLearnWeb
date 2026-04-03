@@ -20587,7 +20587,7 @@ async function readApiPayload(response: Response): Promise<ApiResponsePayload> {
 }
 
 async function fetchJson(path: string, token: string): Promise<unknown> {
-  const response = await fetch(resolveApiUrl(path), {
+  const response = await fetchWithExamApiFallback(path, {
     cache: "no-store",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -20605,8 +20605,7 @@ async function fetchJson(path: string, token: string): Promise<unknown> {
 }
 
 async function postJson(path: string, token: string, body: unknown): Promise<unknown> {
-  const resolvedUrl = resolveApiUrl(path);
-  const response = await fetch(resolvedUrl, {
+  const response = await fetchWithExamApiFallback(path, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -20620,14 +20619,14 @@ async function postJson(path: string, token: string, body: unknown): Promise<unk
   if (!response.ok) {
     handleSessionErrorStatus(response.status);
     const apiMessage = data.error || data.message || "Error procesando solicitud";
-    throw new Error(`${apiMessage} (HTTP ${response.status} POST ${resolvedUrl})`);
+    throw new Error(`${apiMessage} (HTTP ${response.status} POST ${path})`);
   }
 
   return data;
 }
 
 async function patchJson(path: string, token: string, body: unknown): Promise<unknown> {
-  const response = await fetch(resolveApiUrl(path), {
+  const response = await fetchWithExamApiFallback(path, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
@@ -20647,7 +20646,7 @@ async function patchJson(path: string, token: string, body: unknown): Promise<un
 }
 
 async function putJson(path: string, token: string, body: unknown): Promise<unknown> {
-  const response = await fetch(resolveApiUrl(path), {
+  const response = await fetchWithExamApiFallback(path, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -20667,7 +20666,7 @@ async function putJson(path: string, token: string, body: unknown): Promise<unkn
 }
 
 async function postFormData(path: string, token: string, formData: FormData): Promise<unknown> {
-  const response = await fetch(resolveApiUrl(path), {
+  const response = await fetchWithExamApiFallback(path, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -20686,7 +20685,7 @@ async function postFormData(path: string, token: string, formData: FormData): Pr
 }
 
 async function deleteJson(path: string, token: string) {
-  const response = await fetch(resolveApiUrl(path), {
+  const response = await fetchWithExamApiFallback(path, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -20732,6 +20731,38 @@ function resolveApiUrl(path: string): string {
     return `${normalizedBase}${normalizedPath}`;
   }
   return path;
+}
+
+function resolveLegacyExamApiPath(path: string): string | null {
+  if (!path.startsWith("/api/v1/exams")) {
+    return null;
+  }
+  return path.replace(/^\/api\/v1\/exams(\/|$)/, "/api/v1/ia/exams$1");
+}
+
+async function fetchWithExamApiFallback(path: string, init: RequestInit): Promise<Response> {
+  const primaryUrl = resolveApiUrl(path);
+  const legacyPath = resolveLegacyExamApiPath(path);
+  const legacyUrl = legacyPath ? resolveApiUrl(legacyPath) : null;
+
+  try {
+    const primaryResponse = await fetch(primaryUrl, init);
+    if (!legacyUrl) {
+      return primaryResponse;
+    }
+
+    // Durante despliegues parciales, algunos nodos aun exponen /api/v1/ia/exams.
+    if (primaryResponse.status === 404 || primaryResponse.status === 405) {
+      const legacyResponse = await fetch(legacyUrl, init);
+      return legacyResponse;
+    }
+    return primaryResponse;
+  } catch (error) {
+    if (!legacyUrl) {
+      throw error;
+    }
+    return fetch(legacyUrl, init);
+  }
 }
 
 function MetricCard({ title, value }: { title: string; value: string }) {
