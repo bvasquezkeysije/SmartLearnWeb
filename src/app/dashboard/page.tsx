@@ -7509,8 +7509,19 @@ export default function DashboardPage() {
           <button
             type="button"
             onClick={(event) => {
+                console.info("[ANCHOR_DEBUG][INDIVIDUAL_CLICK_PRECHECK]", {
+                  examId: item.id,
+                  fromCourseContent,
+                  actionOrigin,
+                  resolvedContentContext: resolvedContentContext ?? null,
+                });
                 const anchoredContext = ensureAnchoredContextOrReport(event);
                 if (fromCourseContent && !anchoredContext) {
+                  console.error("[ANCHOR_DEBUG][INDIVIDUAL_CLICK_BLOCKED_MISSING_CONTEXT]", {
+                    examId: item.id,
+                    actionOrigin,
+                    fromCourseContent,
+                  });
                   return;
                 }
                 onAnchoredExamActionClick(event);
@@ -8691,7 +8702,19 @@ export default function DashboardPage() {
     contentContext?: { courseId: number; sessionId: number; contentId: number },
   ) => {
     const exam = examOverride ?? selectedExam;
+    console.info("[ANCHOR_DEBUG][INDIVIDUAL_HANDLER_ENTER]", {
+      examId: exam?.id ?? null,
+      restart,
+      originSection,
+      providedContentContext: contentContext ?? null,
+      activeExamContentContext: activeExamContentContext ?? null,
+      hasUser: Boolean(user),
+    });
     if (!user || !exam) {
+      console.warn("[ANCHOR_DEBUG][INDIVIDUAL_HANDLER_RETURN_NO_USER_OR_EXAM]", {
+        hasUser: Boolean(user),
+        hasExam: Boolean(exam),
+      });
       return;
     }
     const effectiveContentContext =
@@ -8699,6 +8722,10 @@ export default function DashboardPage() {
         ? (contentContext ?? activeExamContentContext ?? null)
         : (contentContext ?? null);
     if (originSection === "cursos" && !effectiveContentContext) {
+      console.error("[ANCHOR_DEBUG][INDIVIDUAL_HANDLER_BLOCKED_MISSING_CONTEXT]", {
+        examId: exam.id,
+        originSection,
+      });
       setExamFeedbackInContext(
         "No se pudo resolver el contexto del curso para iniciar el repaso anclado.",
         "error",
@@ -8727,6 +8754,11 @@ export default function DashboardPage() {
       )) as ExamQuestion[];
 
       if (questions.length === 0) {
+        console.warn("[ANCHOR_DEBUG][INDIVIDUAL_HANDLER_RETURN_NO_QUESTIONS]", {
+          examId: exam.id,
+          originSection,
+          effectiveContentContext,
+        });
         setExamFeedbackInContext("Este examen no tiene preguntas para iniciar repaso.", "error", originSection);
         return;
       }
@@ -8758,12 +8790,16 @@ export default function DashboardPage() {
         orderedQuestions = [...questions].sort(() => Math.random() - 0.5);
       }
 
-      if (shouldRegisterAttempt) {
-        const practiceBasePath = resolveExamPracticeBasePath(exam.id, effectiveContentContext);
-        const startEndpoint = `${practiceBasePath}/start`;
+      const practiceBasePath = resolveExamPracticeBasePath(exam.id, effectiveContentContext);
+      const startEndpoint = `${practiceBasePath}/start`;
+      const isAnchoredCoursePractice = originSection === "cursos" && effectiveContentContext != null;
+      const mustRegisterAttemptNow = isAnchoredCoursePractice || shouldRegisterAttempt;
+      if (mustRegisterAttemptNow) {
         console.info("[ANCHOR_DEBUG][INDIVIDUAL_ENDPOINT]", {
           examId: exam.id,
           originSection,
+          isAnchoredCoursePractice,
+          shouldRegisterAttempt,
           contentContext: effectiveContentContext,
           basePath: practiceBasePath,
           endpoint: startEndpoint,
@@ -8811,6 +8847,12 @@ export default function DashboardPage() {
         setExamFeedbackInContext(`Repaso iniciado con ${orderedQuestions.length} preguntas.`, "success", originSection);
       }
     } catch (practiceError) {
+      console.error("[ANCHOR_DEBUG][INDIVIDUAL_HANDLER_ERROR]", {
+        examId: exam.id,
+        originSection,
+        effectiveContentContext,
+        error: practiceError instanceof Error ? practiceError.message : String(practiceError),
+      });
       if (practiceError instanceof Error) {
         setExamFeedbackInContext(practiceError.message, "error", originSection);
       } else {
