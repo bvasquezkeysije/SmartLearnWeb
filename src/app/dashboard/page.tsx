@@ -3350,14 +3350,11 @@ export default function DashboardPage() {
         if (result.resourceType === "schedule") {
           const resolvedScheduleId =
             Number.isFinite(result.resourceId) && result.resourceId > 0 ? result.resourceId : null;
-          if (resolvedScheduleId != null) {
-            setSchedulePreferredProfileId(resolvedScheduleId);
-            const scheduleModule = await fetchJson(
-              `/api/v1/schedules?userId=${user.id}&scheduleId=${resolvedScheduleId}`,
-              user.token,
-            );
-            setPayload(scheduleModule);
-          }
+          // Al reclamar un horario compartido no fijamos el modulo en modo compartido.
+          // Se recarga la vista base para mantener visible el horario propio del usuario.
+          setSchedulePreferredProfileId(null);
+          const scheduleModule = await fetchJson(`/api/v1/schedules?userId=${user.id}`, user.token);
+          setPayload(scheduleModule);
           setActive("horarios");
           setScheduleFeedback(result.message?.trim() || "Horario compartido agregado a tu modulo de horarios.", "success");
           void loadHomeShareNotifications();
