@@ -1933,7 +1933,7 @@ function notificationRequiresInvitationResponse(resourceType: unknown): boolean 
     return false;
   }
   const normalized = resourceType.trim().toLowerCase();
-  return normalized === "exam" || normalized === "schedule" || normalized === "course_join_request";
+  return normalized === "exam" || normalized === "schedule" || normalized === "course" || normalized === "course_join_request";
 }
 
 function isSupportConversationPayload(value: unknown): value is SupportConversationItem {
@@ -3336,14 +3336,12 @@ export default function DashboardPage() {
         }
 
         if (result.resourceType === "course") {
-          const courses = await fetchJson(`/api/v1/courses?userId=${user.id}`, user.token);
-          setPayload(courses);
-          setActive("cursos");
-          if (Number.isFinite(result.resourceId) && result.resourceId > 0) {
-            setOpenedCourseId(result.resourceId);
-            setOpenedCourseTab("curso");
-          }
-          setCourseFeedback(result.message?.trim() || "Curso compartido agregado a tu lista.", "success");
+          await loadHomeShareNotifications();
+          setActive("inicio");
+          setCourseFeedback(
+            result.message?.trim() || "Invitacion recibida. Aceptala desde notificaciones para unirte al curso.",
+            "success",
+          );
           return;
         }
 
@@ -4095,7 +4093,7 @@ export default function DashboardPage() {
         coverImageData: courseCoverImageData?.trim() ? courseCoverImageData.trim() : null,
         code: courseCode.trim() ? courseCode.trim() : null,
         visibility: courseVisibility,
-        joinMode: courseJoinMode,
+        joinMode: courseVisibility === "public" ? courseJoinMode : "open",
       });
       setCourseName("");
       setCourseDescription("");
@@ -4123,8 +4121,9 @@ export default function DashboardPage() {
     setEditingCourseName(course.name);
     setEditingCourseDescription(course.description ?? "");
     setEditingCourseCode(course.code?.trim() ? course.code : "");
-    setEditingCourseVisibility(course.visibility === "private" ? "private" : "public");
-    setEditingCourseJoinMode(course.joinMode === "request" ? "request" : "open");
+    const nextVisibility = course.visibility === "private" ? "private" : "public";
+    setEditingCourseVisibility(nextVisibility);
+    setEditingCourseJoinMode(nextVisibility === "private" ? "open" : course.joinMode === "request" ? "request" : "open");
     setEditingCourseCoverImageData(course.coverImageData?.trim() ? course.coverImageData : null);
     setEditingCourseCoverImageName(course.coverImageData?.trim() ? "Imagen actual" : "");
     setCourseActionMenuId(null);
@@ -4154,7 +4153,7 @@ export default function DashboardPage() {
         coverImageData: editingCourseCoverImageData,
         code: editingCourseCode.trim() ? editingCourseCode.trim() : null,
         visibility: editingCourseVisibility,
-        joinMode: editingCourseJoinMode,
+        joinMode: editingCourseVisibility === "public" ? editingCourseJoinMode : "open",
       });
       await refreshCourses();
       setShowEditCourseModal(false);
@@ -6475,6 +6474,14 @@ export default function DashboardPage() {
         return;
       }
 
+      if (updatedResourceType === "course") {
+        await refreshCourses();
+        setActive("cursos");
+        const courseName = updated.resourceName?.trim() || notification.resourceName?.trim() || "Curso";
+        setCourseFeedback(`Invitacion aceptada. ${courseName} ya esta disponible en tu modulo de cursos.`, "success");
+        return;
+      }
+
       if (updatedResourceType === "schedule") {
         const scheduleId = Number(updated.resourceId ?? notification.resourceId);
         if (Number.isFinite(scheduleId) && scheduleId > 0) {
@@ -6542,6 +6549,10 @@ export default function DashboardPage() {
               : [],
           );
         }
+      }
+
+      if (resourceType === "course") {
+        await refreshCourses();
       }
     } catch (rejectError) {
       if (rejectError instanceof Error) {
@@ -12680,7 +12691,13 @@ export default function DashboardPage() {
                   />
                   <select
                     value={courseVisibility}
-                    onChange={(event) => setCourseVisibility(event.target.value as "public" | "private")}
+                    onChange={(event) => {
+                      const nextVisibility = event.target.value as "public" | "private";
+                      setCourseVisibility(nextVisibility);
+                      if (nextVisibility === "private") {
+                        setCourseJoinMode("open");
+                      }
+                    }}
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
                   >
                     <option value="public">Publico</option>
@@ -12689,10 +12706,17 @@ export default function DashboardPage() {
                   <select
                     value={courseJoinMode}
                     onChange={(event) => setCourseJoinMode(event.target.value as "open" | "request")}
+                    disabled={courseVisibility === "private"}
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
                   >
-                    <option value="open">Ingreso publico directo</option>
-                    <option value="request">Publico con solicitud</option>
+                    {courseVisibility === "private" ? (
+                      <option value="open">Privado (solo compartir)</option>
+                    ) : (
+                      <>
+                        <option value="open">Ingreso publico directo</option>
+                        <option value="request">Publico con solicitud</option>
+                      </>
+                    )}
                   </select>
                 </div>
                 <div className="space-y-2">
@@ -13236,7 +13260,13 @@ export default function DashboardPage() {
                   />
                   <select
                     value={editingCourseVisibility}
-                    onChange={(event) => setEditingCourseVisibility(event.target.value as "public" | "private")}
+                    onChange={(event) => {
+                      const nextVisibility = event.target.value as "public" | "private";
+                      setEditingCourseVisibility(nextVisibility);
+                      if (nextVisibility === "private") {
+                        setEditingCourseJoinMode("open");
+                      }
+                    }}
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
                   >
                     <option value="public">Publico</option>
@@ -13245,10 +13275,17 @@ export default function DashboardPage() {
                   <select
                     value={editingCourseJoinMode}
                     onChange={(event) => setEditingCourseJoinMode(event.target.value as "open" | "request")}
+                    disabled={editingCourseVisibility === "private"}
                     className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
                   >
-                    <option value="open">Ingreso publico directo</option>
-                    <option value="request">Publico con solicitud</option>
+                    {editingCourseVisibility === "private" ? (
+                      <option value="open">Privado (solo compartir)</option>
+                    ) : (
+                      <>
+                        <option value="open">Ingreso publico directo</option>
+                        <option value="request">Publico con solicitud</option>
+                      </>
+                    )}
                   </select>
                 </div>
                 <div className="space-y-2">
