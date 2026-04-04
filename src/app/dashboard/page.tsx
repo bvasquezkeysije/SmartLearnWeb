@@ -10,6 +10,7 @@ import {
   TouchEvent,
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -553,7 +554,21 @@ type SalaModulePayload = {
 };
 
 type ScheduleDayKey = "all" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday" | "saturday" | "sunday";
-type ScheduleColorKey = "blue" | "emerald" | "amber" | "violet" | "rose";
+type ScheduleColorKey =
+  | "blue"
+  | "emerald"
+  | "amber"
+  | "violet"
+  | "rose"
+  | "cyan"
+  | "indigo"
+  | "teal"
+  | "orange"
+  | "lime"
+  | "fuchsia"
+  | "slate"
+  | "red"
+  | "pink";
 type ScheduleActivity = {
   id: number;
   title: string;
@@ -926,13 +941,67 @@ const SCHEDULE_COLOR_OPTIONS: Array<{
   bg: string;
   border: string;
   text: string;
+  swatch: string;
 }> = [
-  { key: "blue", label: "Azul", bg: "bg-blue-100", border: "border-blue-200", text: "text-blue-900" },
-  { key: "emerald", label: "Verde", bg: "bg-emerald-100", border: "border-emerald-200", text: "text-emerald-900" },
-  { key: "amber", label: "Amarillo", bg: "bg-amber-100", border: "border-amber-200", text: "text-amber-900" },
-  { key: "violet", label: "Violeta", bg: "bg-violet-100", border: "border-violet-200", text: "text-violet-900" },
-  { key: "rose", label: "Rosado", bg: "bg-rose-100", border: "border-rose-200", text: "text-rose-900" },
+  { key: "blue", label: "Azul", bg: "bg-blue-100", border: "border-blue-200", text: "text-blue-900", swatch: "bg-blue-500" },
+  {
+    key: "emerald",
+    label: "Verde",
+    bg: "bg-emerald-100",
+    border: "border-emerald-200",
+    text: "text-emerald-900",
+    swatch: "bg-emerald-500",
+  },
+  {
+    key: "amber",
+    label: "Amarillo",
+    bg: "bg-amber-100",
+    border: "border-amber-200",
+    text: "text-amber-900",
+    swatch: "bg-amber-500",
+  },
+  {
+    key: "violet",
+    label: "Violeta",
+    bg: "bg-violet-100",
+    border: "border-violet-200",
+    text: "text-violet-900",
+    swatch: "bg-violet-500",
+  },
+  { key: "rose", label: "Rosado", bg: "bg-rose-100", border: "border-rose-200", text: "text-rose-900", swatch: "bg-rose-500" },
+  { key: "cyan", label: "Cian", bg: "bg-cyan-100", border: "border-cyan-200", text: "text-cyan-900", swatch: "bg-cyan-500" },
+  {
+    key: "indigo",
+    label: "Indigo",
+    bg: "bg-indigo-100",
+    border: "border-indigo-200",
+    text: "text-indigo-900",
+    swatch: "bg-indigo-500",
+  },
+  { key: "teal", label: "Teal", bg: "bg-teal-100", border: "border-teal-200", text: "text-teal-900", swatch: "bg-teal-500" },
+  {
+    key: "orange",
+    label: "Naranja",
+    bg: "bg-orange-100",
+    border: "border-orange-200",
+    text: "text-orange-900",
+    swatch: "bg-orange-500",
+  },
+  { key: "lime", label: "Lima", bg: "bg-lime-100", border: "border-lime-200", text: "text-lime-900", swatch: "bg-lime-500" },
+  {
+    key: "fuchsia",
+    label: "Fucsia",
+    bg: "bg-fuchsia-100",
+    border: "border-fuchsia-200",
+    text: "text-fuchsia-900",
+    swatch: "bg-fuchsia-500",
+  },
+  { key: "slate", label: "Pizarra", bg: "bg-slate-200", border: "border-slate-300", text: "text-slate-800", swatch: "bg-slate-500" },
+  { key: "red", label: "Rojo", bg: "bg-red-100", border: "border-red-200", text: "text-red-900", swatch: "bg-red-500" },
+  { key: "pink", label: "Rosa", bg: "bg-pink-100", border: "border-pink-200", text: "text-pink-900", swatch: "bg-pink-500" },
 ];
+
+const SCHEDULE_COLOR_KEYS = new Set<ScheduleColorKey>(SCHEDULE_COLOR_OPTIONS.map((option) => option.key));
 
 function scheduleColorClasses(color: ScheduleColorKey) {
   return SCHEDULE_COLOR_OPTIONS.find((option) => option.key === color) ?? SCHEDULE_COLOR_OPTIONS[0];
@@ -957,10 +1026,179 @@ function normalizeScheduleDayKey(value: unknown): ScheduleDayKey {
 }
 
 function normalizeScheduleColorKey(value: unknown): ScheduleColorKey {
-  if (value === "blue" || value === "emerald" || value === "amber" || value === "violet" || value === "rose") {
-    return value;
+  if (typeof value === "string" && SCHEDULE_COLOR_KEYS.has(value as ScheduleColorKey)) {
+    return value as ScheduleColorKey;
   }
   return "blue";
+}
+
+function normalizeOptionalText(value: string): string | null {
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
+function ScheduleColorPicker({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: ScheduleColorKey;
+  onChange: (next: ScheduleColorKey) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const selectedIndex = Math.max(
+    SCHEDULE_COLOR_OPTIONS.findIndex((option) => option.key === value),
+    0,
+  );
+  const selected = SCHEDULE_COLOR_OPTIONS[selectedIndex] ?? SCHEDULE_COLOR_OPTIONS[0];
+  const listboxId = useId();
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const handlePointerDown = (event: globalThis.MouseEvent) => {
+      if (!rootRef.current) {
+        return;
+      }
+      if (event.target instanceof Node && !rootRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [open]);
+
+  const openList = () => {
+    setActiveIndex(selectedIndex);
+    setOpen(true);
+  };
+
+  const closeList = () => {
+    setOpen(false);
+    setActiveIndex(selectedIndex);
+  };
+
+  const selectByIndex = (index: number) => {
+    const option = SCHEDULE_COLOR_OPTIONS[index];
+    if (!option) {
+      return;
+    }
+    onChange(option.key);
+    setActiveIndex(index);
+    setOpen(false);
+  };
+
+  const onTriggerKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      if (!open) {
+        openList();
+      } else {
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        const nextIndex = (activeIndex + delta + SCHEDULE_COLOR_OPTIONS.length) % SCHEDULE_COLOR_OPTIONS.length;
+        setActiveIndex(nextIndex);
+      }
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (!open) {
+        openList();
+      } else {
+        selectByIndex(activeIndex);
+      }
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeList();
+    }
+  };
+
+  const onListKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const delta = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex = (activeIndex + delta + SCHEDULE_COLOR_OPTIONS.length) % SCHEDULE_COLOR_OPTIONS.length;
+      setActiveIndex(nextIndex);
+      return;
+    }
+    if (event.key === "Enter") {
+      event.preventDefault();
+      selectByIndex(activeIndex);
+      return;
+    }
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeList();
+    }
+  };
+
+  return (
+    <div className="relative" ref={rootRef}>
+      <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">{label}</label>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus-visible:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-200"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls={listboxId}
+        onClick={() => {
+          if (open) {
+            closeList();
+          } else {
+            openList();
+          }
+        }}
+        onKeyDown={onTriggerKeyDown}
+      >
+        <span className="inline-flex items-center gap-2">
+          <span className={`h-3.5 w-3.5 rounded-full border border-slate-300 ${selected.swatch}`} aria-hidden="true" />
+          <span>{selected.label}</span>
+        </span>
+        <span className="text-slate-500" aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div
+          id={listboxId}
+          role="listbox"
+          tabIndex={-1}
+          className="absolute z-30 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-300 bg-white p-1 shadow-lg"
+          onKeyDown={onListKeyDown}
+        >
+          {SCHEDULE_COLOR_OPTIONS.map((option, index) => {
+            const selectedOption = option.key === value;
+            const activeOption = index === activeIndex;
+            return (
+              <button
+                key={option.key}
+                type="button"
+                role="option"
+                aria-selected={selectedOption}
+                className={`flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left text-sm outline-none focus-visible:ring-2 focus-visible:ring-blue-200 ${
+                  activeOption ? "bg-blue-50" : "hover:bg-slate-100"
+                } ${selectedOption ? "font-semibold text-slate-900" : "text-slate-700"}`}
+                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => selectByIndex(index)}
+              >
+                <span className="inline-flex items-center gap-2">
+                  <span className={`h-3.5 w-3.5 rounded-full border border-slate-300 ${option.swatch}`} aria-hidden="true" />
+                  <span>{option.label}</span>
+                </span>
+                {selectedOption ? <span aria-hidden="true">✓</span> : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function timeToMinutes(value: string): number {
@@ -3203,6 +3441,8 @@ export default function DashboardPage() {
     setScheduleActivities(
       scheduleModule.activities.map((activity) => ({
         ...activity,
+        description: typeof activity.description === "string" ? activity.description : "",
+        location: typeof activity.location === "string" ? activity.location : "",
         day: normalizeScheduleDayKey(activity.day),
         color: normalizeScheduleColorKey(activity.color),
       })),
@@ -3755,8 +3995,8 @@ export default function DashboardPage() {
     }
 
     const title = scheduleFormTitle.trim();
-    const description = scheduleFormDescription.trim();
-    const location = scheduleFormLocation.trim();
+    const description = normalizeOptionalText(scheduleFormDescription);
+    const location = normalizeOptionalText(scheduleFormLocation);
 
     if (!title) {
       setScheduleFeedback("Ingresa el nombre de la actividad.", "error");
@@ -3782,11 +4022,11 @@ export default function DashboardPage() {
       const body = {
         userId: user.id,
         title,
-        description: description || null,
+        description,
         day: scheduleFormDay,
         startTime: normalizedStartTime,
         endTime: normalizedEndTime,
-        location: location || null,
+        location,
         color: scheduleFormColor,
       };
       if (editingScheduleId != null) {
@@ -3858,7 +4098,7 @@ export default function DashboardPage() {
     }
     setEditingScheduleId(activity.id);
     setScheduleFormTitle(activity.title);
-    setScheduleFormDescription(activity.description);
+    setScheduleFormDescription(activity.description || "");
     setScheduleFormDay(activity.day);
     const startSplit = splitScheduleTimeForForm(activity.startTime);
     if (startSplit) {
@@ -3876,7 +4116,7 @@ export default function DashboardPage() {
       setScheduleFormEndTime("09:30");
       setScheduleFormEndMeridiem("AM");
     }
-    setScheduleFormLocation(activity.location);
+    setScheduleFormLocation(activity.location || "");
     setScheduleFormColor(activity.color);
     setScheduleActionMenuId(null);
     setShowCreateScheduleModal(true);
@@ -17910,20 +18150,7 @@ export default function DashboardPage() {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Color</label>
-              <select
-                value={scheduleFormColor}
-                onChange={(event) => setScheduleFormColor(event.target.value as ScheduleColorKey)}
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
-              >
-                {SCHEDULE_COLOR_OPTIONS.map((colorOption) => (
-                  <option key={colorOption.key} value={colorOption.key}>
-                    {colorOption.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <ScheduleColorPicker label="Color" value={scheduleFormColor} onChange={setScheduleFormColor} />
           </div>
           <div className="grid gap-3 md:grid-cols-2">
             <div>
