@@ -20989,6 +20989,32 @@ function handleSessionErrorStatus(status: number) {
   }
 }
 
+function sanitizeApiMessage(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const lower = trimmed.toLowerCase();
+  const looksHtml =
+    lower.startsWith("<!doctype html") ||
+    lower.startsWith("<html") ||
+    (lower.includes("<head") && lower.includes("<body"));
+
+  if (looksHtml) {
+    if (lower.includes("404") || lower.includes("not found")) {
+      return "Recurso no encontrado en el backend.";
+    }
+    return "Respuesta invalida del servidor. Reinicia API y Web, y vuelve a intentar.";
+  }
+
+  if (trimmed.length > 280) {
+    return `${trimmed.slice(0, 280)}...`;
+  }
+
+  return trimmed;
+}
+
 async function readApiPayload(response: Response): Promise<ApiResponsePayload> {
   const contentType = response.headers.get("content-type") ?? "";
   if (contentType.includes("application/json")) {
@@ -21007,7 +21033,7 @@ async function readApiPayload(response: Response): Promise<ApiResponsePayload> {
   try {
     return JSON.parse(raw) as ApiResponsePayload;
   } catch {
-    return { message: raw };
+    return { message: sanitizeApiMessage(raw) ?? "Respuesta invalida del servidor" };
   }
 }
 
