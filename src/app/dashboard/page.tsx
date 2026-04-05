@@ -2401,6 +2401,7 @@ export default function DashboardPage() {
   const [courseSessionWeeklyContent, setCourseSessionWeeklyContent] = useState("");
   const [showCreateCourseSessionModal, setShowCreateCourseSessionModal] = useState(false);
   const [showEditCourseSessionModal, setShowEditCourseSessionModal] = useState(false);
+  const [showCourseWeekModal, setShowCourseWeekModal] = useState(false);
   const [editingCourseSessionId, setEditingCourseSessionId] = useState<number | null>(null);
   const [editingCourseSessionName, setEditingCourseSessionName] = useState("");
   const [editingCourseSessionWeeklyContent, setEditingCourseSessionWeeklyContent] = useState("");
@@ -4597,12 +4598,7 @@ export default function DashboardPage() {
     setEditingCourseSessionId(session.id);
     setEditingCourseSessionName(formatSessionName(session.name));
     setEditingCourseSessionWeeklyContent(session.weeklyContent?.trim() ?? "");
-    setAddingWeekSessionId(session.id);
-    setEditingCourseWeekId(null);
-    setCourseWeekName("");
-    setCourseWeekDescription("");
-    const nextOrder = (session.weeks ?? []).reduce((max, week) => Math.max(max, Number(week.weekOrder ?? 0)), 0) + 1;
-    setCourseWeekOrder(String(Math.max(1, nextOrder)));
+    resetCourseWeekEditor();
     setShowEditCourseSessionModal(true);
     setCourseMessage("");
   };
@@ -4748,6 +4744,7 @@ export default function DashboardPage() {
   };
 
   const resetCourseWeekEditor = () => {
+    setShowCourseWeekModal(false);
     setAddingWeekSessionId(null);
     setEditingCourseWeekId(null);
     setCourseWeekName("");
@@ -4794,27 +4791,21 @@ export default function DashboardPage() {
   const onOpenCreateCourseWeekModal = (session: CourseSessionItem) => {
     const nextOrder = (session.weeks ?? []).reduce((max, week) => Math.max(max, Number(week.weekOrder ?? 0)), 0) + 1;
     setAddingWeekSessionId(session.id);
-    setEditingCourseSessionId(session.id);
-    setEditingCourseSessionName(formatSessionName(session.name));
-    setEditingCourseSessionWeeklyContent(session.weeklyContent?.trim() ?? "");
     setEditingCourseWeekId(null);
     setCourseWeekName("");
     setCourseWeekDescription("");
     setCourseWeekOrder(String(Math.max(1, nextOrder)));
-    setShowEditCourseSessionModal(true);
+    setShowCourseWeekModal(true);
     setCourseMessage("");
   };
 
   const onOpenEditCourseWeekModal = (session: CourseSessionItem, week: CourseWeekItem) => {
     setAddingWeekSessionId(session.id);
-    setEditingCourseSessionId(session.id);
-    setEditingCourseSessionName(formatSessionName(session.name));
-    setEditingCourseSessionWeeklyContent(session.weeklyContent?.trim() ?? "");
     setEditingCourseWeekId(week.id);
     setCourseWeekName(week.name?.trim() ?? "");
     setCourseWeekDescription(week.description?.trim() ?? "");
     setCourseWeekOrder(String(Math.max(1, Number(week.weekOrder ?? 1))));
-    setShowEditCourseSessionModal(true);
+    setShowCourseWeekModal(true);
     setCourseMessage("");
   };
 
@@ -11884,6 +11875,10 @@ export default function DashboardPage() {
         editingCourseSessionId == null
           ? null
           : orderedOpenedCourseSessions.find((session) => session.id === editingCourseSessionId) ?? null;
+      const weekEditorSession =
+        addingWeekSessionId == null
+          ? null
+          : orderedOpenedCourseSessions.find((session) => session.id === addingWeekSessionId) ?? null;
       const nextOpenedSessionOrder = getNextSessionOrder(openedCourseSessions);
       const addingContentSession =
         addingContentSessionId == null
@@ -13141,7 +13136,18 @@ export default function DashboardPage() {
                 </form>
 
                 <div className="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Semanas de la sesion</p>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Semanas de la sesion</p>
+                    {editingCourseSession ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenCreateCourseWeekModal(editingCourseSession)}
+                        className="rounded-md border border-indigo-300 bg-white px-2 py-1 text-[11px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                      >
+                        Nueva semana
+                      </button>
+                    ) : null}
+                  </div>
                   {editingCourseSession?.weeks && editingCourseSession.weeks.length > 0 ? (
                     <div className="space-y-2">
                       {[...editingCourseSession.weeks]
@@ -13182,59 +13188,59 @@ export default function DashboardPage() {
                   ) : (
                     <p className="text-xs text-indigo-700">Aun no hay semanas creadas para esta sesion.</p>
                   )}
-
-                  <form onSubmit={onCreateCourseWeek} className="space-y-2 rounded-lg border border-indigo-200 bg-white p-2">
-                    <p className="text-[11px] font-semibold text-indigo-700">
-                      {editingCourseWeekId == null ? "Nueva semana" : "Editar semana seleccionada"}
-                    </p>
-                    <input
-                      value={courseWeekName}
-                      onChange={(event) => setCourseWeekName(event.target.value)}
-                      placeholder="Nombre de la semana (ej. SEMANA 2: Practica)"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
-                    />
-                    <input
-                      value={courseWeekOrder}
-                      onChange={(event) => setCourseWeekOrder(event.target.value)}
-                      placeholder="Orden de semana"
-                      inputMode="numeric"
-                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
-                    />
-                    <textarea
-                      value={courseWeekDescription}
-                      onChange={(event) => setCourseWeekDescription(event.target.value)}
-                      placeholder="Descripcion de la semana"
-                      className="min-h-20 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
-                    />
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (editingCourseSession) {
-                            onOpenCreateCourseWeekModal(editingCourseSession);
-                          }
-                        }}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
-                      >
-                        Limpiar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={creatingCourseWeek}
-                        className="rounded-lg bg-[#004aad] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
-                      >
-                        {creatingCourseWeek
-                          ? editingCourseWeekId == null
-                            ? "Creando..."
-                            : "Guardando..."
-                          : editingCourseWeekId == null
-                            ? "Crear semana"
-                            : "Guardar semana"}
-                      </button>
-                    </div>
-                  </form>
                 </div>
               </div>
+            </ModalShell>
+          ) : null}
+
+          {showCourseWeekModal && weekEditorSession ? (
+            <ModalShell
+              title={`${editingCourseWeekId == null ? "Nueva semana" : "Editar semana"}: ${formatSessionName(weekEditorSession.name)}`}
+              onClose={resetCourseWeekEditor}
+            >
+              <form onSubmit={onCreateCourseWeek} className="space-y-3">
+                <input
+                  value={courseWeekName}
+                  onChange={(event) => setCourseWeekName(event.target.value)}
+                  placeholder="Nombre de la semana (ej. SEMANA 2: Practica)"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                />
+                <input
+                  value={courseWeekOrder}
+                  onChange={(event) => setCourseWeekOrder(event.target.value)}
+                  placeholder="Orden de semana"
+                  inputMode="numeric"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                />
+                <textarea
+                  value={courseWeekDescription}
+                  onChange={(event) => setCourseWeekDescription(event.target.value)}
+                  placeholder="Descripcion de la semana"
+                  className="min-h-20 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onOpenCreateCourseWeekModal(weekEditorSession)}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Limpiar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingCourseWeek}
+                    className="rounded-lg bg-[#004aad] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#003b88] disabled:opacity-70"
+                  >
+                    {creatingCourseWeek
+                      ? editingCourseWeekId == null
+                        ? "Creando..."
+                        : "Guardando..."
+                      : editingCourseWeekId == null
+                        ? "Crear semana"
+                        : "Guardar semana"}
+                  </button>
+                </div>
+              </form>
             </ModalShell>
           ) : null}
 
