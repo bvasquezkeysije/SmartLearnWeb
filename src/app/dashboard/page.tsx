@@ -7501,6 +7501,7 @@ export default function DashboardPage() {
 
     const examIds = new Set<number>();
     const examContextById = new Map<number, { courseId: number; sessionId: number; contentId: number }>();
+    const examFallbackNameById = new Map<number, string>();
     for (const session of openedCourse.sessions ?? []) {
       const allSessionContents = [
         ...(session.contents ?? []),
@@ -7511,6 +7512,11 @@ export default function DashboardPage() {
         const sourceExamId = resolveSourceExamId(content.sourceExamId);
         if ((type === "exam" || type === "examen") && sourceExamId != null) {
           examIds.add(sourceExamId);
+          if (!examFallbackNameById.has(sourceExamId)) {
+            const fallbackName =
+              content.sourceExamName?.trim() || content.title?.trim() || `EXAMEN-${String(sourceExamId).padStart(6, "0")}`;
+            examFallbackNameById.set(sourceExamId, fallbackName);
+          }
           if (
             !examContextById.has(sourceExamId) &&
             typeof openedCourse.id === "number" &&
@@ -7575,10 +7581,28 @@ export default function DashboardPage() {
                   // fallback para compatibilidad ante despliegues parciales
                 }
               }
-              return (await fetchJson(
-                `/api/v1/exams/${examId}/summary?userId=${user.id}`,
-                user.token,
-              )) as ExamSummary;
+              try {
+                return (await fetchJson(
+                  `/api/v1/exams/${examId}/summary?userId=${user.id}`,
+                  user.token,
+                )) as ExamSummary;
+              } catch {
+                // En cuentas viewer puede fallar summary general; devolvemos un resumen minimo
+                // para mantener la tarjeta anclada con botones de accion.
+                return {
+                  id: examId,
+                  name: examFallbackNameById.get(examId) ?? `EXAMEN-${String(examId).padStart(6, "0")}`,
+                  visibility: "private",
+                  accessRole: "viewer",
+                  canEditQuestions: false,
+                  canEditSettings: false,
+                  canShare: false,
+                  canStartGroup: false,
+                  canRenameExam: false,
+                  participantsCount: 1,
+                  questionsCount: 0,
+                } satisfies ExamSummary;
+              }
             }),
           );
           if (!cancelled) {
