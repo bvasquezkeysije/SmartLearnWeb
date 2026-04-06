@@ -12290,7 +12290,22 @@ export default function DashboardPage() {
                                                     const sourceExamId = resolveSourceExamId(content.sourceExamId);
                                                     const sourceExam =
                                                       sourceExamId != null
-                                                        ? courseExamCatalogById[sourceExamId] ?? null
+                                                        ? (courseExamCatalogById[sourceExamId] ??
+                                                          {
+                                                            id: sourceExamId,
+                                                            name:
+                                                              content.sourceExamName?.trim() ||
+                                                              content.title?.trim() ||
+                                                              `EXAMEN-${String(sourceExamId).padStart(6, "0")}`,
+                                                            visibility: "private",
+                                                            accessRole: "viewer",
+                                                            canEditQuestions: false,
+                                                            canEditSettings: false,
+                                                            canShare: false,
+                                                            canStartGroup: false,
+                                                            canRenameExam: false,
+                                                            participantsCount: 1,
+                                                          })
                                                         : null;
                                                     const typeLabel =
                                                       contentType === "video"
