@@ -21051,7 +21051,8 @@ function emitSessionExpiredEvent(reason: "inactive" | "unauthorized") {
 }
 
 function handleSessionErrorStatus(status: number) {
-  if (status === 401 || status === 403) {
+  // 403 = falta de permisos en un endpoint puntual, no sesion caducada.
+  if (status === 401) {
     emitSessionExpiredEvent("unauthorized");
   }
 }
