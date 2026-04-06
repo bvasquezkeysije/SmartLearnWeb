@@ -7627,6 +7627,92 @@ export default function DashboardPage() {
     };
   }, [user, active, openedCourseId, payload, anchoredExamVisibilityById, courseExamCatalogById]);
 
+  useEffect(() => {
+    if (!user || active !== "cursos" || openedCourseId == null) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const syncAnchoredExamStatuses = async () => {
+      const courseModule = parseCourseModulePayload(payload);
+      const openedCourse = courseModule.courses.find((course) => course.id === openedCourseId);
+      if (!openedCourse) {
+        return;
+      }
+
+      const contexts = new Map<number, { courseId: number; sessionId: number; contentId: number }>();
+      for (const session of openedCourse.sessions ?? []) {
+        const allSessionContents = [
+          ...(session.contents ?? []),
+          ...((session.weeks ?? []).flatMap((week) => week.contents ?? [])),
+        ];
+        for (const content of allSessionContents) {
+          const type = (content.type ?? "").toLowerCase();
+          const sourceExamId = resolveSourceExamId(content.sourceExamId);
+          if (
+            (type === "exam" || type === "examen") &&
+            sourceExamId != null &&
+            !contexts.has(sourceExamId) &&
+            typeof openedCourse.id === "number" &&
+            typeof session.id === "number" &&
+            typeof content.id === "number"
+          ) {
+            contexts.set(sourceExamId, {
+              courseId: openedCourse.id,
+              sessionId: session.id,
+              contentId: content.id,
+            });
+          }
+        }
+      }
+
+      if (contexts.size === 0) {
+        return;
+      }
+
+      const summaries = await Promise.all(
+        Array.from(contexts.entries()).map(async ([examId, context]) => {
+          try {
+            return (await fetchJson(
+              `/api/v1/courses/${context.courseId}/sessions/${context.sessionId}/contents/${context.contentId}/exam-summary?userId=${user.id}`,
+              user.token,
+            )) as ExamSummary;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      const validSummaries = summaries.filter((summary): summary is ExamSummary => Boolean(summary && typeof summary.id === "number"));
+      if (validSummaries.length === 0) {
+        return;
+      }
+
+      setCourseExamCatalogById((previous) => {
+        const next = { ...previous };
+        for (const summary of validSummaries) {
+          next[summary.id] = summary;
+        }
+        return next;
+      });
+    };
+
+    void syncAnchoredExamStatuses();
+    const intervalId = window.setInterval(() => {
+      void syncAnchoredExamStatuses();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [user, active, openedCourseId, payload]);
+
   const renderExamCardActions = (
     item: ExamSummary,
     options?: {
