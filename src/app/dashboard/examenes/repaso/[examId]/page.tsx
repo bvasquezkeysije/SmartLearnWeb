@@ -38,7 +38,42 @@ type ExamQuestion = {
 type PracticeStatus = "correct" | "incorrect" | "unanswered";
 
 function normalizeAnswer(value: string): string {
-  return value.trim().toLowerCase();
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "")
+    .trim();
+}
+
+function isWrittenAnswerCorrect(question: ExamQuestion, submittedValue: string): boolean {
+  const submitted = normalizeAnswer(submittedValue);
+  if (!submitted) {
+    return false;
+  }
+
+  const acceptedAnswers = new Set<string>();
+  const rawCorrectAnswer = question.correctAnswer ?? "";
+  const splitCorrectAnswers = rawCorrectAnswer
+    .split(/\r?\n|[;|]/)
+    .map((item) => normalizeAnswer(item))
+    .filter((item) => item.length > 0);
+
+  for (const answer of splitCorrectAnswers) {
+    acceptedAnswers.add(answer);
+  }
+
+  const normalizedFullCorrectAnswer = normalizeAnswer(rawCorrectAnswer);
+  if (normalizedFullCorrectAnswer) {
+    acceptedAnswers.add(normalizedFullCorrectAnswer);
+  }
+
+  const normalizedExplanation = normalizeAnswer(question.explanation ?? "");
+  if (normalizedExplanation) {
+    acceptedAnswers.add(normalizedExplanation);
+  }
+
+  return acceptedAnswers.has(submitted);
 }
 
 function resolveCorrectOption(question: ExamQuestion): "a" | "b" | "c" | "d" {
@@ -218,8 +253,7 @@ export default function ExamPracticePage() {
     } else if (!writtenAnswer.trim()) {
       status = "unanswered";
     } else {
-      const expected = normalizeAnswer(currentQuestion.correctAnswer ?? "");
-      status = normalizeAnswer(writtenAnswer) === expected ? "correct" : "incorrect";
+      status = isWrittenAnswerCorrect(currentQuestion, writtenAnswer) ? "correct" : "incorrect";
     }
 
     const nextResults = { ...results, [currentQuestion.id]: status };

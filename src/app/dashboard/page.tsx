@@ -2537,6 +2537,7 @@ export default function DashboardPage() {
   const [groupTimerExpired, setGroupTimerExpired] = useState(false);
   const [groupTimerExpiredQuestionKey, setGroupTimerExpiredQuestionKey] = useState<string | null>(null);
   const groupQuestionRuntimeKeyRef = useRef<string | null>(null);
+  const groupQuestionStartedAtMsRef = useRef(0);
   const groupReviewQuestionKeyRef = useRef<string | null>(null);
   const groupReviewStartedAtMsRef = useRef<number | null>(null);
   const groupStatePollInFlightRef = useRef(false);
@@ -4221,7 +4222,44 @@ export default function DashboardPage() {
     return "a";
   };
 
-  const normalizeAnswer = (value: string): string => value.trim().toLowerCase();
+  const normalizeAnswer = (value: string): string => {
+    return (value ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "")
+      .trim();
+  };
+
+  const isWrittenAnswerCorrect = (question: ExamQuestion, submittedValue: string): boolean => {
+    const submitted = normalizeAnswer(submittedValue);
+    if (!submitted) {
+      return false;
+    }
+
+    const acceptedAnswers = new Set<string>();
+    const rawCorrectAnswer = question.correctAnswer ?? "";
+    const splitCorrectAnswers = rawCorrectAnswer
+      .split(/\r?\n|[;|]/)
+      .map((item) => normalizeAnswer(item))
+      .filter((item) => item.length > 0);
+
+    for (const answer of splitCorrectAnswers) {
+      acceptedAnswers.add(answer);
+    }
+
+    const normalizedFullCorrectAnswer = normalizeAnswer(rawCorrectAnswer);
+    if (normalizedFullCorrectAnswer) {
+      acceptedAnswers.add(normalizedFullCorrectAnswer);
+    }
+
+    const normalizedExplanation = normalizeAnswer(question.explanation ?? "");
+    if (normalizedExplanation) {
+      acceptedAnswers.add(normalizedExplanation);
+    }
+
+    return acceptedAnswers.has(submitted);
+  };
 
   const formatClock = (totalSeconds: number): string => {
     const safeValue = Math.max(0, Math.trunc(totalSeconds));
@@ -9573,6 +9611,7 @@ export default function DashboardPage() {
       setGroupTimerExpiredQuestionKey(null);
       setGroupAutoAdvanceSecondsLeft(null);
       groupQuestionRuntimeKeyRef.current = null;
+      groupQuestionStartedAtMsRef.current = 0;
       groupReviewQuestionKeyRef.current = null;
       groupReviewStartedAtMsRef.current = null;
       groupReviewRefreshInFlightRef.current = false;
@@ -9782,8 +9821,7 @@ export default function DashboardPage() {
       if (!practiceWrittenAnswer.trim()) {
         status = "unanswered";
       } else {
-        const correctValue = normalizeAnswer(question.correctAnswer ?? "");
-        status = normalizeAnswer(practiceWrittenAnswer) === correctValue ? "correct" : "incorrect";
+        status = isWrittenAnswerCorrect(question, practiceWrittenAnswer) ? "correct" : "incorrect";
       }
     }
 
@@ -9939,6 +9977,7 @@ export default function DashboardPage() {
     setGroupAutoSubmitKey(null);
     setGroupTimerExpired(false);
     groupQuestionRuntimeKeyRef.current = null;
+    groupQuestionStartedAtMsRef.current = 0;
     resetPracticeInputState();
     setActiveExamContentContext(null);
     restorePracticeOriginSurface();
@@ -10171,24 +10210,31 @@ export default function DashboardPage() {
       setGroupQuestionElapsedSeconds(0);
       setGroupQuestionRemainingSeconds(null);
       groupQuestionRuntimeKeyRef.current = null;
+      groupQuestionStartedAtMsRef.current = 0;
       return;
     }
 
     const questionRuntimeKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`;
     const timerLimit = Math.max(0, groupPracticeState.currentQuestion.temporizadorSegundos ?? 0);
     const parsedStartedAt = toMillisOrZero(groupQuestionStartedAtEpochMs ?? groupQuestionStartedAt);
-    const startedAtMs = parsedStartedAt > 0 ? parsedStartedAt : getGroupServerNowMs();
     if (groupQuestionRuntimeKeyRef.current !== questionRuntimeKey) {
       groupQuestionRuntimeKeyRef.current = questionRuntimeKey;
+      groupQuestionStartedAtMsRef.current = parsedStartedAt > 0 ? parsedStartedAt : getGroupServerNowMs();
       setGroupTimerExpired(false);
       setGroupTimerExpiredQuestionKey(null);
       setGroupAutoSubmitKey(null);
       setGroupAutoAdvanceSecondsLeft(null);
       setGroupQuestionElapsedSeconds(0);
       setGroupQuestionRemainingSeconds(timerLimit > 0 ? timerLimit : null);
+    } else if (parsedStartedAt > 0 && groupQuestionStartedAtMsRef.current <= 0) {
+      // Usa el timestamp del servidor si llega tarde, sin reiniciar cada poll.
+      groupQuestionStartedAtMsRef.current = parsedStartedAt;
     }
 
     const tick = () => {
+      const startedAtMs = groupQuestionStartedAtMsRef.current > 0
+        ? groupQuestionStartedAtMsRef.current
+        : getGroupServerNowMs();
       const elapsed = Math.max(0, Math.floor((getGroupServerNowMs() - startedAtMs) / 1000));
       setGroupQuestionElapsedSeconds(elapsed);
       if (timerLimit > 0) {
