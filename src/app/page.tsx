@@ -85,8 +85,8 @@ declare global {
 }
 
 const GOOGLE_CLIENT_ID =
-  (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ??
-    "441996631829-cvhr6craa4kc3mbltlvcol2jbjsaeqi2.apps.googleusercontent.com").trim();
+  (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? "").trim() ||
+  "441996631829-cvhr6craa4kc3mbltlvcol2jbjsaeqi2.apps.googleusercontent.com";
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
 
 function resolveDefaultPublicApiBase(): string {
