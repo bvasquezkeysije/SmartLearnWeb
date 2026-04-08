@@ -44,6 +44,17 @@ type MenuItem = {
   label: string;
 };
 
+type AndroidReleaseRow = {
+  id: number;
+  versionName: string;
+  versionCode: number;
+  apkUrl: string;
+  checksumSha256?: string | null;
+  releaseNotes?: string | null;
+  isActive: boolean;
+  createdAt?: unknown;
+};
+
 type ExamSummary = {
   id: number;
   name: string;
@@ -1353,6 +1364,7 @@ function practiceDraftKey(userId: number, examId: number): string {
 const adminMenu: MenuItem[] = [
   { key: "dashboard", label: "Dashboard" },
   { key: "users", label: "Usuarios" },
+  { key: "android-releases", label: "Android APK" },
   { key: "profile", label: "Perfil" },
   { key: "support", label: "Soporte" },
 ];
@@ -2307,6 +2319,16 @@ export default function DashboardPage() {
   const [userPage, setUserPage] = useState(1);
   const [userMessage, setUserMessage] = useState("");
   const [userMessageType, setUserMessageType] = useState<"info" | "success" | "error">("info");
+  const [androidReleaseMessage, setAndroidReleaseMessage] = useState("");
+  const [androidReleaseMessageType, setAndroidReleaseMessageType] = useState<"info" | "success" | "error">("info");
+  const [androidVersionName, setAndroidVersionName] = useState("");
+  const [androidVersionCode, setAndroidVersionCode] = useState("");
+  const [androidApkUrl, setAndroidApkUrl] = useState("");
+  const [androidChecksumSha256, setAndroidChecksumSha256] = useState("");
+  const [androidReleaseNotes, setAndroidReleaseNotes] = useState("");
+  const [androidCreateAsActive, setAndroidCreateAsActive] = useState(true);
+  const [androidSavingRelease, setAndroidSavingRelease] = useState(false);
+  const [androidActivatingReleaseId, setAndroidActivatingReleaseId] = useState<number | null>(null);
   const [showCreateUserPanel, setShowCreateUserPanel] = useState(false);
   const [showManageRolesPanel, setShowManageRolesPanel] = useState(false);
   const [rolesLoading, setRolesLoading] = useState(false);
@@ -3112,12 +3134,12 @@ export default function DashboardPage() {
     const normalizedUserScale = Number.isFinite(userScale) ? Math.min(3, Math.max(1, userScale)) : 1;
     const normalizedUserOffsetX = Number.isFinite(userOffsetX) ? clampProfileImageOffsetX(userOffsetX, normalizedUserScale) : 0;
     const normalizedUserOffsetY = 0;
-    let nextImageData = typeof user.profileImageData === "string" && user.profileImageData.trim()
+    const nextImageData = typeof user.profileImageData === "string" && user.profileImageData.trim()
       ? user.profileImageData.trim()
       : null;
-    let nextScale = normalizedUserScale;
-    let nextOffsetX = normalizedUserOffsetX;
-    let nextOffsetY = normalizedUserOffsetY;
+    const nextScale = normalizedUserScale;
+    const nextOffsetX = normalizedUserOffsetX;
+    const nextOffsetY = normalizedUserOffsetY;
     try {
       const rawStoredImage = localStorage.getItem(dashboardProfileImageKey(user.id));
       // No mostrar cache local si el servidor no tiene foto: evita casos donde solo
@@ -3314,6 +3336,10 @@ export default function DashboardPage() {
 
         if (active === "users") {
           setPayload(await fetchJson(`/api/v1/users?requesterUserId=${userId}`, token));
+          return;
+        }
+        if (active === "android-releases") {
+          setPayload(await fetchJson("/api/v1/admin/mobile/android/releases", token));
           return;
         }
         if (active === "projects") {
@@ -4289,12 +4315,34 @@ export default function DashboardPage() {
     setEditUserRole("user");
   };
 
+  const setAndroidReleaseFeedback = (message: string, type: "info" | "success" | "error") => {
+    setAndroidReleaseMessage(message);
+    setAndroidReleaseMessageType(type);
+  };
+
+  const resetAndroidReleaseForm = () => {
+    setAndroidVersionName("");
+    setAndroidVersionCode("");
+    setAndroidApkUrl("");
+    setAndroidChecksumSha256("");
+    setAndroidReleaseNotes("");
+    setAndroidCreateAsActive(true);
+  };
+
   const refreshUsers = async () => {
     if (!user) {
       return;
     }
     const users = (await fetchJson(`/api/v1/users?requesterUserId=${user.id}`, user.token)) as AdminUserRow[];
     setPayload(users);
+  };
+
+  const refreshAndroidReleases = async () => {
+    if (!user) {
+      return;
+    }
+    const releases = (await fetchJson("/api/v1/admin/mobile/android/releases", user.token)) as AndroidReleaseRow[];
+    setPayload(releases);
   };
 
   const refreshCourses = async () => {
@@ -5657,6 +5705,66 @@ export default function DashboardPage() {
       }
     } finally {
       setCreatingUser(false);
+    }
+  };
+
+  const onCreateAndroidRelease = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!user) {
+      return;
+    }
+
+    const normalizedVersionName = androidVersionName.trim();
+    const normalizedApkUrl = androidApkUrl.trim();
+    const parsedVersionCode = Number.parseInt(androidVersionCode, 10);
+    if (!normalizedVersionName || !normalizedApkUrl || Number.isNaN(parsedVersionCode) || parsedVersionCode < 1) {
+      setAndroidReleaseFeedback("Completa version, versionCode y APK URL validos.", "error");
+      return;
+    }
+
+    setAndroidSavingRelease(true);
+    setAndroidReleaseMessage("");
+    try {
+      await postJson("/api/v1/admin/mobile/android/releases", user.token, {
+        versionName: normalizedVersionName,
+        versionCode: parsedVersionCode,
+        apkUrl: normalizedApkUrl,
+        checksumSha256: androidChecksumSha256.trim() || null,
+        releaseNotes: androidReleaseNotes.trim() || null,
+        isActive: androidCreateAsActive,
+      });
+      await refreshAndroidReleases();
+      resetAndroidReleaseForm();
+      setAndroidReleaseFeedback("Release Android guardada correctamente.", "success");
+    } catch (releaseError) {
+      if (releaseError instanceof Error) {
+        setAndroidReleaseFeedback(releaseError.message, "error");
+      } else {
+        setAndroidReleaseFeedback("No se pudo guardar la release Android.", "error");
+      }
+    } finally {
+      setAndroidSavingRelease(false);
+    }
+  };
+
+  const onActivateAndroidRelease = async (releaseId: number) => {
+    if (!user) {
+      return;
+    }
+    setAndroidActivatingReleaseId(releaseId);
+    setAndroidReleaseMessage("");
+    try {
+      await patchJson(`/api/v1/admin/mobile/android/releases/${releaseId}/activate`, user.token, {});
+      await refreshAndroidReleases();
+      setAndroidReleaseFeedback("Release Android activada correctamente.", "success");
+    } catch (activateError) {
+      if (activateError instanceof Error) {
+        setAndroidReleaseFeedback(activateError.message, "error");
+      } else {
+        setAndroidReleaseFeedback("No se pudo activar la release Android.", "error");
+      }
+    } finally {
+      setAndroidActivatingReleaseId(null);
     }
   };
 
@@ -11665,6 +11773,140 @@ export default function DashboardPage() {
                 </li>
               ))}
             </ul>
+          )}
+        </DataCard>
+      );
+    }
+
+    if (active === "android-releases") {
+      const releases = (Array.isArray(payload) ? payload : []) as AndroidReleaseRow[];
+      return (
+        <DataCard title="Android APK Releases">
+          <p className="text-sm text-slate-600">Gestiona versiones APK y activa la release publica vigente.</p>
+
+          {androidReleaseMessage ? (
+            <div
+              className={`mt-3 rounded-lg border px-3 py-2 text-sm ${
+                androidReleaseMessageType === "success"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : androidReleaseMessageType === "error"
+                    ? "border-rose-200 bg-rose-50 text-rose-700"
+                    : "border-blue-200 bg-blue-50 text-blue-700"
+              }`}
+            >
+              {androidReleaseMessage}
+            </div>
+          ) : null}
+
+          <form onSubmit={onCreateAndroidRelease} className="mt-3 grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-2">
+            <input
+              value={androidVersionName}
+              onChange={(event) => setAndroidVersionName(event.target.value)}
+              placeholder="Version (ej: 1.3.0)"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+              required
+            />
+            <input
+              value={androidVersionCode}
+              onChange={(event) => setAndroidVersionCode(event.target.value)}
+              placeholder="Version code (ej: 130)"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+              required
+            />
+            <input
+              value={androidApkUrl}
+              onChange={(event) => setAndroidApkUrl(event.target.value)}
+              placeholder="URL APK"
+              className="md:col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+              required
+            />
+            <input
+              value={androidChecksumSha256}
+              onChange={(event) => setAndroidChecksumSha256(event.target.value)}
+              placeholder="Checksum SHA256 (opcional)"
+              className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+            />
+            <label className="flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                checked={androidCreateAsActive}
+                onChange={(event) => setAndroidCreateAsActive(event.target.checked)}
+              />
+              Activar al crear
+            </label>
+            <textarea
+              value={androidReleaseNotes}
+              onChange={(event) => setAndroidReleaseNotes(event.target.value)}
+              placeholder="Notas de release (opcional)"
+              rows={3}
+              className="md:col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
+            />
+            <div className="md:col-span-2 flex justify-end">
+              <button
+                type="submit"
+                disabled={androidSavingRelease}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-70"
+              >
+                {androidSavingRelease ? "Guardando..." : "Crear release"}
+              </button>
+            </div>
+          </form>
+
+          {releases.length === 0 ? (
+            <div className="mt-3">
+              <EmptyState text="No hay releases Android registradas." />
+            </div>
+          ) : (
+            <div className="mt-3 overflow-auto rounded-lg border border-slate-200">
+              <table className="min-w-full border-collapse text-sm">
+                <thead className="bg-slate-100 text-slate-700">
+                  <tr>
+                    <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Version</th>
+                    <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Code</th>
+                    <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Estado</th>
+                    <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">APK</th>
+                    <th className="border-b border-slate-200 px-3 py-2 text-left font-semibold">Accion</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {releases.map((release) => (
+                    <tr key={release.id} className="bg-white text-slate-700">
+                      <td className="border-b border-slate-100 px-3 py-2 font-medium">{release.versionName}</td>
+                      <td className="border-b border-slate-100 px-3 py-2">{release.versionCode}</td>
+                      <td className="border-b border-slate-100 px-3 py-2">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            release.isActive ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
+                          }`}
+                        >
+                          {release.isActive ? "Activa" : "Inactiva"}
+                        </span>
+                      </td>
+                      <td className="border-b border-slate-100 px-3 py-2">
+                        <a
+                          href={release.apkUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-blue-700 hover:underline"
+                        >
+                          Descargar
+                        </a>
+                      </td>
+                      <td className="border-b border-slate-100 px-3 py-2">
+                        <button
+                          type="button"
+                          disabled={release.isActive || androidActivatingReleaseId === release.id}
+                          onClick={() => void onActivateAndroidRelease(release.id)}
+                          className="rounded-lg border border-blue-300 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {androidActivatingReleaseId === release.id ? "Activando..." : "Activar"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </DataCard>
       );
@@ -18538,14 +18780,14 @@ export default function DashboardPage() {
                                       className={`flex h-full flex-col justify-between rounded-md border px-1.5 pt-1.5 pb-1.5 text-[11px] font-semibold ${
                                         scheduleColorClasses(singleActivity.color).bg
                                       } ${scheduleColorClasses(singleActivity.color).border} ${scheduleColorClasses(singleActivity.color).text}`}
-                                      style={{ height: `${minHeight}px` }}
+                                      style={{ minHeight: `${minHeight}px` }}
                                       title={`${singleActivity.title} (${formatScheduleTimeRangeForDisplay(singleActivity.startTime, singleActivity.endTime)})`}
                                     >
                                       <div className="relative">
                                         <div className="flex items-start justify-between gap-1">
                                           <div className="min-w-0 pr-1">
-                                            <p className="truncate">{singleActivity.title}</p>
-                                            <p className="truncate text-[9px] font-medium opacity-80">
+                                            <p className="whitespace-normal break-words leading-tight">{singleActivity.title}</p>
+                                            <p className="whitespace-normal break-words text-[9px] font-medium leading-tight opacity-80">
                                               {singleActivity.location?.trim() || "Sin ubicacion"}
                                             </p>
                                           </div>
@@ -18593,7 +18835,7 @@ export default function DashboardPage() {
                                           </div>
                                         ) : null}
                                       </div>
-                                      <p className="truncate text-[9px] opacity-80">
+                                      <p className="whitespace-normal break-words text-[9px] leading-tight opacity-80">
                                         {formatScheduleTimeRangeForDisplay(singleActivity.startTime, singleActivity.endTime)}
                                       </p>
                                     </div>
@@ -18617,8 +18859,8 @@ export default function DashboardPage() {
                                               <div className="relative">
                                                 <div className="flex items-start justify-between gap-1">
                                                   <div className="min-w-0 pr-1">
-                                                    <p className="truncate">{activity.title}</p>
-                                                    <p className="truncate text-[9px] font-medium opacity-80">
+                                                    <p className="whitespace-normal break-words leading-tight">{activity.title}</p>
+                                                    <p className="whitespace-normal break-words text-[9px] font-medium leading-tight opacity-80">
                                                       {activity.location?.trim() || "Sin ubicacion"}
                                                     </p>
                                                   </div>
@@ -18666,7 +18908,7 @@ export default function DashboardPage() {
                                                   </div>
                                                 ) : null}
                                               </div>
-                                              <p className="truncate text-[9px] opacity-80">
+                                              <p className="whitespace-normal break-words text-[9px] leading-tight opacity-80">
                                                 {formatScheduleTimeRangeForDisplay(activity.startTime, activity.endTime)}
                                               </p>
                                             </div>

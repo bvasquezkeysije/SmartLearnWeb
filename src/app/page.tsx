@@ -21,6 +21,20 @@ type LoginResponse = {
   profileImageOffsetY?: number | null;
 };
 
+type LocalRegisterResponse = LoginResponse & {
+  message?: string | null;
+};
+
+type AndroidLatestReleaseResponse = {
+  id: number;
+  versionName: string;
+  versionCode: number;
+  apkUrl: string;
+  checksumSha256?: string | null;
+  releaseNotes?: string | null;
+  isActive: boolean;
+};
+
 type GoogleLoginApiResponse = {
   requiresRegistration: boolean;
   id?: number | null;
@@ -95,6 +109,14 @@ export default function Home() {
   const [googleScriptReady, setGoogleScriptReady] = useState(false);
   const [googleRegisterLoading, setGoogleRegisterLoading] = useState(false);
   const [error, setError] = useState("");
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [registerName, setRegisterName] = useState("");
+  const [registerUsername, setRegisterUsername] = useState("");
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [registerConfirmPassword, setRegisterConfirmPassword] = useState("");
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [latestApk, setLatestApk] = useState<AndroidLatestReleaseResponse | null>(null);
 
   const [googlePendingAccessToken, setGooglePendingAccessToken] = useState("");
   const [googleRegisterOpen, setGoogleRegisterOpen] = useState(false);
@@ -128,6 +150,28 @@ export default function Home() {
     }
     const queryToken = new URLSearchParams(window.location.search).get("share");
     setShareToken((queryToken ?? "").trim());
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadLatestApk = async () => {
+      try {
+        const response = await fetch("/api/v1/public/mobile/android/latest", { cache: "no-store" });
+        if (!response.ok) {
+          return;
+        }
+        const data = await readJsonPayload<AndroidLatestReleaseResponse>(response);
+        if (!cancelled && data.apkUrl && data.versionName) {
+          setLatestApk(data);
+        }
+      } catch {
+        // Keep login flow uninterrupted if APK endpoint is temporarily unavailable.
+      }
+    };
+    void loadLatestApk();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const handleGoogleAccessToken = useCallback(
@@ -329,6 +373,59 @@ export default function Home() {
     }
   };
 
+  const onSubmitLocalRegister = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+
+    const normalizedName = registerName.trim();
+    const normalizedUsername = registerUsername.trim();
+    const normalizedEmail = registerEmail.trim().toLowerCase();
+    if (!normalizedName || !normalizedUsername || !normalizedEmail || !registerPassword.trim()) {
+      setError("Completa todos los campos para registrarte.");
+      return;
+    }
+    if (registerPassword.length < 8) {
+      setError("La contrasena debe tener al menos 8 caracteres.");
+      return;
+    }
+    if (registerPassword !== registerConfirmPassword) {
+      setError("Las contrasenas no coinciden.");
+      return;
+    }
+
+    setRegisterLoading(true);
+    try {
+      const response = await fetch("/api/v1/auth/register", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: normalizedName,
+          username: normalizedUsername,
+          email: normalizedEmail,
+          password: registerPassword,
+          confirmPassword: registerConfirmPassword,
+        }),
+      });
+      const data = await readJsonPayload<LocalRegisterResponse>(response);
+      if (!response.ok) {
+        setError(data.error || data.message || "No se pudo completar el registro.");
+        return;
+      }
+      if (!data.token) {
+        setError("Respuesta incompleta del registro.");
+        return;
+      }
+      setRegisterOpen(false);
+      persistSession(data);
+    } catch {
+      setError("No hay conexion con la API para registro local.");
+    } finally {
+      setRegisterLoading(false);
+    }
+  };
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-slate-100">
       <Script src="https://accounts.google.com/gsi/client" strategy="afterInteractive" onLoad={() => setGoogleScriptReady(true)} />
@@ -445,18 +542,29 @@ export default function Home() {
 
                 <button
                   type="submit"
-                  disabled={loading || googleLoading || googleRegisterLoading}
+                  disabled={loading || googleLoading || googleRegisterLoading || registerLoading}
                   className="w-full rounded-lg bg-slate-900 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   {loading ? "Ingresando..." : "Iniciar sesion"}
                 </button>
               </form>
 
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setRegisterOpen(true)}
+                  disabled={loading || googleLoading || googleRegisterLoading || registerLoading}
+                  className="w-full rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  Registrarse con correo
+                </button>
+              </div>
+
               <div className="mt-4">
                 <button
                   type="button"
                   onClick={onGoogleSignInClick}
-                  disabled={loading || googleLoading || googleRegisterLoading}
+                  disabled={loading || googleLoading || googleRegisterLoading || registerLoading}
                   className="flex w-full items-center justify-center gap-3 rounded-lg border border-slate-300 bg-white px-4 py-3 text-base font-semibold text-slate-800 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="h-6 w-6">
@@ -469,6 +577,26 @@ export default function Home() {
                 </button>
                 {googleLoading ? <p className="mt-2 text-center text-xs text-slate-500">Procesando Google...</p> : null}
               </div>
+
+              {latestApk ? (
+                <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                  <p className="text-sm font-semibold text-emerald-800">APK Android disponible</p>
+                  <p className="mt-1 text-xs text-emerald-700">
+                    Version {latestApk.versionName} ({latestApk.versionCode})
+                  </p>
+                  {latestApk.releaseNotes?.trim() ? (
+                    <p className="mt-2 text-xs text-emerald-700">{latestApk.releaseNotes.trim()}</p>
+                  ) : null}
+                  <a
+                    href={latestApk.apkUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mt-3 inline-flex rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
+                  >
+                    Descargar APK
+                  </a>
+                </div>
+              ) : null}
 
               {googleRegisterOpen ? (
                 <div
@@ -540,6 +668,106 @@ export default function Home() {
                           className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
                         >
                           {googleRegisterLoading ? "Registrando..." : "Registrarse"}
+                        </button>
+                      </div>
+                    </form>
+                  </section>
+                </div>
+              ) : null}
+
+              {registerOpen ? (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/55 p-4"
+                  onClick={() => setRegisterOpen(false)}
+                >
+                  <section
+                    className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-4 shadow-2xl"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <h2 className="text-lg font-semibold text-slate-900">Crear cuenta local</h2>
+                      <button
+                        type="button"
+                        onClick={() => setRegisterOpen(false)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-300 text-slate-600 hover:bg-slate-100"
+                        aria-label="Cerrar registro local"
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-600">
+                      Registra tu cuenta para ingresar con correo o username.
+                    </p>
+                    <form onSubmit={onSubmitLocalRegister} className="mt-4 space-y-3">
+                      <div>
+                        <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Nombre</label>
+                        <input
+                          value={registerName}
+                          onChange={(event) => setRegisterName(event.target.value)}
+                          className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-300"
+                          type="text"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Username</label>
+                        <input
+                          value={registerUsername}
+                          onChange={(event) => setRegisterUsername(event.target.value)}
+                          className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-300"
+                          type="text"
+                          minLength={3}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Correo</label>
+                        <input
+                          value={registerEmail}
+                          onChange={(event) => setRegisterEmail(event.target.value)}
+                          className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-300"
+                          type="email"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium uppercase tracking-wide text-slate-500">Contrasena</label>
+                        <input
+                          value={registerPassword}
+                          onChange={(event) => setRegisterPassword(event.target.value)}
+                          className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-300"
+                          type="password"
+                          minLength={8}
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                          Confirmar contrasena
+                        </label>
+                        <input
+                          value={registerConfirmPassword}
+                          onChange={(event) => setRegisterConfirmPassword(event.target.value)}
+                          className="mt-2 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-slate-900 shadow-sm outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-300"
+                          type="password"
+                          minLength={8}
+                          required
+                        />
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setRegisterOpen(false)}
+                          className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={registerLoading || loading || googleLoading}
+                          className="rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-70"
+                        >
+                          {registerLoading ? "Registrando..." : "Crear cuenta"}
                         </button>
                       </div>
                     </form>
