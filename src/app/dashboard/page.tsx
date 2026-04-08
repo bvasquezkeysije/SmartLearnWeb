@@ -9707,12 +9707,12 @@ export default function DashboardPage() {
             originSection,
           );
         } else if (rawMessage.toLowerCase().includes("ya existe un repaso grupal creado")) {
-          setExamFeedback("Ya existe un repaso grupal activo. Usa 'Unirse a repaso grupal'.", "error");
+          setExamFeedbackInContext("Ya existe un repaso grupal activo. Usa 'Unirse a repaso grupal'.", "error", originSection);
         } else {
-          setExamFeedback(rawMessage, "error");
+          setExamFeedbackInContext(rawMessage, "error", originSection);
         }
       } else {
-        setExamFeedback("No se pudo crear el repaso grupal.", "error");
+        setExamFeedbackInContext("No se pudo crear el repaso grupal.", "error", originSection);
       }
     } finally {
       setGroupPracticeLoading(false);
@@ -21569,8 +21569,23 @@ export default function DashboardPage() {
 type ApiResponsePayload = {
   error?: string;
   message?: string;
+  authError?: boolean;
   [key: string]: unknown;
 };
+
+class ApiHttpError extends Error {
+  status: number;
+  path: string;
+  authFailure: boolean;
+
+  constructor(message: string, status: number, path: string, authFailure: boolean) {
+    super(message);
+    this.name = "ApiHttpError";
+    this.status = status;
+    this.path = path;
+    this.authFailure = authFailure;
+  }
+}
 
 function emitSessionExpiredEvent(reason: "inactive" | "unauthorized") {
   if (typeof window === "undefined") {
@@ -21579,11 +21594,36 @@ function emitSessionExpiredEvent(reason: "inactive" | "unauthorized") {
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT_NAME, { detail: { reason } }));
 }
 
-function handleSessionErrorStatus(status: number) {
-  // 403 = falta de permisos en un endpoint puntual, no sesion caducada.
-  if (status === 401) {
+function isAuthFailureResponse(status: number, data: ApiResponsePayload): boolean {
+  if (status !== 401) {
+    return false;
+  }
+  if (data.authError === true) {
+    return true;
+  }
+
+  const errorText = String(data.error ?? "").toLowerCase();
+  const messageText = String(data.message ?? "").toLowerCase();
+  const combined = `${errorText} ${messageText}`;
+
+  return (
+    combined.includes("token") ||
+    combined.includes("sesion") ||
+    combined.includes("session") ||
+    combined.includes("inactivo") ||
+    combined.includes("credenciales invalidas")
+  );
+}
+
+function handleSessionErrorStatus(status: number, data: ApiResponsePayload) {
+  if (isAuthFailureResponse(status, data)) {
     emitSessionExpiredEvent("unauthorized");
   }
+}
+
+function buildApiError(defaultMessage: string, status: number, path: string, data: ApiResponsePayload): ApiHttpError {
+  const message = String(data.error || data.message || defaultMessage);
+  return new ApiHttpError(message, status, path, isAuthFailureResponse(status, data));
 }
 
 function sanitizeApiMessage(raw: string): string | null {
@@ -21645,8 +21685,8 @@ async function fetchJson(path: string, token: string): Promise<unknown> {
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status);
-    throw new Error(data.error || data.message || "Error consultando API");
+    handleSessionErrorStatus(response.status, data);
+    throw buildApiError("Error consultando API", response.status, path, data);
   }
 
   return data;
@@ -21665,9 +21705,9 @@ async function postJson(path: string, token: string, body: unknown): Promise<unk
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status);
-    const apiMessage = data.error || data.message || "Error procesando solicitud";
-    throw new Error(`${apiMessage} (HTTP ${response.status} POST ${path})`);
+    handleSessionErrorStatus(response.status, data);
+    const apiError = buildApiError("Error procesando solicitud", response.status, path, data);
+    throw new ApiHttpError(`${apiError.message} (HTTP ${response.status} POST ${path})`, response.status, path, apiError.authFailure);
   }
 
   return data;
@@ -21686,8 +21726,8 @@ async function patchJson(path: string, token: string, body: unknown): Promise<un
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status);
-    throw new Error(data.error || data.message || "Error actualizando");
+    handleSessionErrorStatus(response.status, data);
+    throw buildApiError("Error actualizando", response.status, path, data);
   }
 
   return data;
@@ -21706,8 +21746,8 @@ async function putJson(path: string, token: string, body: unknown): Promise<unkn
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status);
-    throw new Error(data.error || data.message || "Error actualizando");
+    handleSessionErrorStatus(response.status, data);
+    throw buildApiError("Error actualizando", response.status, path, data);
   }
 
   return data;
@@ -21725,8 +21765,8 @@ async function postFormData(path: string, token: string, formData: FormData): Pr
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status);
-    throw new Error(data.error || data.message || "Error subiendo archivo");
+    handleSessionErrorStatus(response.status, data);
+    throw buildApiError("Error subiendo archivo", response.status, path, data);
   }
 
   return data;
@@ -21747,8 +21787,8 @@ async function deleteJson(path: string, token: string) {
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status);
-    throw new Error(data.error || data.message || "Error eliminando examen");
+    handleSessionErrorStatus(response.status, data);
+    throw buildApiError("Error eliminando examen", response.status, path, data);
   }
 }
 
