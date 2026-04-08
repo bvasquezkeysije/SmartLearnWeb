@@ -49,6 +49,8 @@ type AndroidReleaseRow = {
   versionName: string;
   versionCode: number;
   apkUrl: string;
+  fileName?: string | null;
+  fileSizeBytes?: number | null;
   checksumSha256?: string | null;
   releaseNotes?: string | null;
   isActive: boolean;
@@ -2323,7 +2325,7 @@ export default function DashboardPage() {
   const [androidReleaseMessageType, setAndroidReleaseMessageType] = useState<"info" | "success" | "error">("info");
   const [androidVersionName, setAndroidVersionName] = useState("");
   const [androidVersionCode, setAndroidVersionCode] = useState("");
-  const [androidApkUrl, setAndroidApkUrl] = useState("");
+  const [androidApkFile, setAndroidApkFile] = useState<File | null>(null);
   const [androidChecksumSha256, setAndroidChecksumSha256] = useState("");
   const [androidReleaseNotes, setAndroidReleaseNotes] = useState("");
   const [androidCreateAsActive, setAndroidCreateAsActive] = useState(true);
@@ -4323,7 +4325,7 @@ export default function DashboardPage() {
   const resetAndroidReleaseForm = () => {
     setAndroidVersionName("");
     setAndroidVersionCode("");
-    setAndroidApkUrl("");
+    setAndroidApkFile(null);
     setAndroidChecksumSha256("");
     setAndroidReleaseNotes("");
     setAndroidCreateAsActive(true);
@@ -5715,27 +5717,31 @@ export default function DashboardPage() {
     }
 
     const normalizedVersionName = androidVersionName.trim();
-    const normalizedApkUrl = androidApkUrl.trim();
     const parsedVersionCode = Number.parseInt(androidVersionCode, 10);
-    if (!normalizedVersionName || !normalizedApkUrl || Number.isNaN(parsedVersionCode) || parsedVersionCode < 1) {
-      setAndroidReleaseFeedback("Completa version, versionCode y APK URL validos.", "error");
+    if (!normalizedVersionName || Number.isNaN(parsedVersionCode) || parsedVersionCode < 1 || !androidApkFile) {
+      setAndroidReleaseFeedback("Completa version, versionCode y selecciona un archivo APK valido.", "error");
       return;
     }
 
     setAndroidSavingRelease(true);
     setAndroidReleaseMessage("");
     try {
-      await postJson("/api/v1/admin/mobile/android/releases", user.token, {
-        versionName: normalizedVersionName,
-        versionCode: parsedVersionCode,
-        apkUrl: normalizedApkUrl,
-        checksumSha256: androidChecksumSha256.trim() || null,
-        releaseNotes: androidReleaseNotes.trim() || null,
-        isActive: androidCreateAsActive,
-      });
+      const formData = new FormData();
+      formData.append("versionName", normalizedVersionName);
+      formData.append("versionCode", String(parsedVersionCode));
+      formData.append("apkFile", androidApkFile);
+      if (androidChecksumSha256.trim()) {
+        formData.append("checksumSha256", androidChecksumSha256.trim());
+      }
+      if (androidReleaseNotes.trim()) {
+        formData.append("releaseNotes", androidReleaseNotes.trim());
+      }
+      formData.append("isActive", androidCreateAsActive ? "true" : "false");
+
+      await postFormData("/api/v1/admin/mobile/android/releases/upload", user.token, formData);
       await refreshAndroidReleases();
       resetAndroidReleaseForm();
-      setAndroidReleaseFeedback("Release Android guardada correctamente.", "success");
+      setAndroidReleaseFeedback("APK subida y release guardada correctamente.", "success");
     } catch (releaseError) {
       if (releaseError instanceof Error) {
         setAndroidReleaseFeedback(releaseError.message, "error");
@@ -11813,13 +11819,19 @@ export default function DashboardPage() {
               className="rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
               required
             />
-            <input
-              value={androidApkUrl}
-              onChange={(event) => setAndroidApkUrl(event.target.value)}
-              placeholder="URL APK"
-              className="md:col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
-              required
-            />
+            <label className="md:col-span-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700">
+              <span className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">Archivo APK</span>
+              <input
+                type="file"
+                accept=".apk,application/vnd.android.package-archive"
+                onChange={(event) => setAndroidApkFile(event.target.files?.[0] ?? null)}
+                className="w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-700 file:mr-3 file:rounded-md file:border-0 file:bg-[#004aad] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-[#003b88]"
+                required
+              />
+              {androidApkFile ? (
+                <span className="mt-1 block text-xs text-slate-500">{androidApkFile.name}</span>
+              ) : null}
+            </label>
             <input
               value={androidChecksumSha256}
               onChange={(event) => setAndroidChecksumSha256(event.target.value)}
@@ -11883,14 +11895,18 @@ export default function DashboardPage() {
                         </span>
                       </td>
                       <td className="border-b border-slate-100 px-3 py-2">
-                        <a
-                          href={release.apkUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-700 hover:underline"
-                        >
-                          Descargar
-                        </a>
+                        {release.apkUrl ? (
+                          <a
+                            href={release.apkUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-700 hover:underline"
+                          >
+                            {release.fileName?.trim() ? `Descargar (${release.fileName.trim()})` : "Descargar"}
+                          </a>
+                        ) : (
+                          <span className="text-slate-400">No disponible</span>
+                        )}
                       </td>
                       <td className="border-b border-slate-100 px-3 py-2">
                         <button
