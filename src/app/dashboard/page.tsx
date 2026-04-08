@@ -1812,6 +1812,10 @@ function dashboardCourseViewKey(userId: number): string {
   return `smartlearn_dashboard_course_view_${userId}`;
 }
 
+function dashboardCoursesUiStateKey(userId: number, courseId: number): string {
+  return `smartlearn:courses:ui:${userId}:${courseId}`;
+}
+
 function dashboardSalaViewKey(userId: number): string {
   return `smartlearn_dashboard_sala_view_${userId}`;
 }
@@ -1826,6 +1830,19 @@ function dashboardProfileImageKey(userId: number): string {
 
 function dashboardSidebarOpenKey(userId: number): string {
   return `smartlearn_dashboard_sidebar_open_${userId}`;
+}
+
+function sanitizePersistedIdArray(value: unknown): number[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const unique = new Set<number>();
+  for (const item of value) {
+    if (typeof item === "number" && Number.isFinite(item) && item > 0) {
+      unique.add(Math.trunc(item));
+    }
+  }
+  return [...unique];
 }
 
 function isIaChatSummaryPayload(value: unknown): value is ChatSummary {
@@ -2442,7 +2459,9 @@ export default function DashboardPage() {
   const [editingCourseSessionName, setEditingCourseSessionName] = useState("");
   const [editingCourseSessionWeeklyContent, setEditingCourseSessionWeeklyContent] = useState("");
   const [deletingCourseSessionId, setDeletingCourseSessionId] = useState<number | null>(null);
-  const [expandedSessionId, setExpandedSessionId] = useState<number | null>(null);
+  const [openCourseSessionIds, setOpenCourseSessionIds] = useState<number[]>([]);
+  const [openCourseWeekIds, setOpenCourseWeekIds] = useState<number[]>([]);
+  const [openCourseContentGroupIds, setOpenCourseContentGroupIds] = useState<number[]>([]);
   const [showAddSessionContentModal, setShowAddSessionContentModal] = useState(false);
   const [addingWeekSessionId, setAddingWeekSessionId] = useState<number | null>(null);
   const [editingCourseWeekId, setEditingCourseWeekId] = useState<number | null>(null);
@@ -2844,7 +2863,6 @@ export default function DashboardPage() {
 
       let nextOpenedCourseId: number | null = null;
       let nextOpenedCourseTab: "curso" | "participantes" | "calificaciones" | "competencias" = "curso";
-      let nextExpandedSessionId: number | null = null;
 
       const rawCourseView = localStorage.getItem(dashboardCourseViewKey(parsed.id));
       if (rawCourseView) {
@@ -2852,7 +2870,6 @@ export default function DashboardPage() {
           const parsedCourseView = JSON.parse(rawCourseView) as {
             openedCourseId?: unknown;
             openedCourseTab?: unknown;
-            expandedSessionId?: unknown;
           };
           nextOpenedCourseId =
             typeof parsedCourseView.openedCourseId === "number" && Number.isFinite(parsedCourseView.openedCourseId)
@@ -2864,10 +2881,6 @@ export default function DashboardPage() {
             parsedCourseView.openedCourseTab === "competencias"
               ? parsedCourseView.openedCourseTab
               : "curso";
-          nextExpandedSessionId =
-            typeof parsedCourseView.expandedSessionId === "number" && Number.isFinite(parsedCourseView.expandedSessionId)
-              ? parsedCourseView.expandedSessionId
-              : null;
         } catch {
           localStorage.removeItem(dashboardCourseViewKey(parsed.id));
         }
@@ -2892,7 +2905,9 @@ export default function DashboardPage() {
 
       setOpenedCourseId(nextOpenedCourseId);
       setOpenedCourseTab(nextOpenedCourseTab);
-      setExpandedSessionId(nextExpandedSessionId);
+  setOpenCourseSessionIds([]);
+  setOpenCourseWeekIds([]);
+  setOpenCourseContentGroupIds([]);
       courseViewHydratedRef.current = true;
       courseHistoryHydratedRef.current = true;
       skipNextCourseHistoryPushRef.current = true;
@@ -3095,7 +3110,9 @@ export default function DashboardPage() {
           setOpenedCourseId(nextCourseId);
           setOpenedCourseTab(nextCourseId == null ? "curso" : nextCourseTab);
           if (nextCourseId == null) {
-            setExpandedSessionId(null);
+            setOpenCourseSessionIds([]);
+            setOpenCourseWeekIds([]);
+            setOpenCourseContentGroupIds([]);
           }
         }
       }
@@ -3115,10 +3132,91 @@ export default function DashboardPage() {
       JSON.stringify({
         openedCourseId,
         openedCourseTab,
-        expandedSessionId,
       }),
     );
-  }, [user, openedCourseId, openedCourseTab, expandedSessionId]);
+  }, [user, openedCourseId, openedCourseTab]);
+
+  useEffect(() => {
+    if (!user || openedCourseId == null || typeof window === "undefined") {
+      setOpenCourseSessionIds([]);
+      setOpenCourseWeekIds([]);
+      setOpenCourseContentGroupIds([]);
+      return;
+    }
+
+    const storageKey = dashboardCoursesUiStateKey(user.id, openedCourseId);
+    const rawUiState = localStorage.getItem(storageKey);
+    if (!rawUiState) {
+      setOpenCourseSessionIds([]);
+      setOpenCourseWeekIds([]);
+      setOpenCourseContentGroupIds([]);
+      return;
+    }
+
+    try {
+      const parsedUiState = JSON.parse(rawUiState) as {
+        openSessions?: unknown;
+        openWeeks?: unknown;
+        openContentGroups?: unknown;
+      };
+      setOpenCourseSessionIds(sanitizePersistedIdArray(parsedUiState.openSessions));
+      setOpenCourseWeekIds(sanitizePersistedIdArray(parsedUiState.openWeeks));
+      setOpenCourseContentGroupIds(sanitizePersistedIdArray(parsedUiState.openContentGroups));
+    } catch {
+      localStorage.removeItem(storageKey);
+      setOpenCourseSessionIds([]);
+      setOpenCourseWeekIds([]);
+      setOpenCourseContentGroupIds([]);
+    }
+  }, [user, openedCourseId]);
+
+  useEffect(() => {
+    if (!user || openedCourseId == null || typeof window === "undefined") {
+      return;
+    }
+
+    const currentCourseModule = parseCourseModulePayload(payload);
+    const openedCourse = currentCourseModule.courses.find((course) => course.id === openedCourseId);
+    if (!openedCourse) {
+      return;
+    }
+
+    const validSessionIds = new Set<number>((openedCourse.sessions ?? []).map((session) => session.id));
+    const validWeekIds = new Set<number>();
+    for (const session of openedCourse.sessions ?? []) {
+      for (const week of session.weeks ?? []) {
+        validWeekIds.add(week.id);
+      }
+    }
+
+    const nextOpenSessions = openCourseSessionIds.filter((id) => validSessionIds.has(id));
+    const nextOpenWeeks = openCourseWeekIds.filter((id) => validWeekIds.has(id));
+    const nextOpenContentGroups = openCourseContentGroupIds.filter((id) => validWeekIds.has(id));
+
+    if (
+      nextOpenSessions.length !== openCourseSessionIds.length ||
+      nextOpenWeeks.length !== openCourseWeekIds.length ||
+      nextOpenContentGroups.length !== openCourseContentGroupIds.length
+    ) {
+      setOpenCourseSessionIds(nextOpenSessions);
+      setOpenCourseWeekIds(nextOpenWeeks);
+      setOpenCourseContentGroupIds(nextOpenContentGroups);
+    }
+  }, [user, openedCourseId, payload, openCourseSessionIds, openCourseWeekIds, openCourseContentGroupIds]);
+
+  useEffect(() => {
+    if (!user || openedCourseId == null || typeof window === "undefined") {
+      return;
+    }
+    localStorage.setItem(
+      dashboardCoursesUiStateKey(user.id, openedCourseId),
+      JSON.stringify({
+        openSessions: openCourseSessionIds,
+        openWeeks: openCourseWeekIds,
+        openContentGroups: openCourseContentGroupIds,
+      }),
+    );
+  }, [user, openedCourseId, openCourseSessionIds, openCourseWeekIds, openCourseContentGroupIds]);
 
   useEffect(() => {
     if (!user || !salaViewHydratedRef.current) {
@@ -3669,6 +3767,17 @@ export default function DashboardPage() {
       localStorage.removeItem(dashboardSectionKey(sessionUser.id));
       localStorage.removeItem(dashboardIaChatKey(sessionUser.id));
       localStorage.removeItem(dashboardCourseViewKey(sessionUser.id));
+      const courseUiPrefix = `smartlearn:courses:ui:${sessionUser.id}:`;
+      const keysToDelete: string[] = [];
+      for (let index = 0; index < localStorage.length; index += 1) {
+        const storageKey = localStorage.key(index);
+        if (storageKey && storageKey.startsWith(courseUiPrefix)) {
+          keysToDelete.push(storageKey);
+        }
+      }
+      for (const storageKey of keysToDelete) {
+        localStorage.removeItem(storageKey);
+      }
       localStorage.removeItem(dashboardSalaViewKey(sessionUser.id));
       localStorage.removeItem(dashboardGroupPracticeViewKey(sessionUser.id));
       localStorage.removeItem(dashboardSidebarOpenKey(sessionUser.id));
@@ -4376,14 +4485,14 @@ export default function DashboardPage() {
       setOpenedCourseId(courseId);
     }
     if (sessionId != null) {
-      setExpandedSessionId(sessionId);
+      setOpenCourseSessionIds((current) => (current.includes(sessionId) ? current : [...current, sessionId]));
     }
     await refreshCourses();
     if (courseId != null) {
       setOpenedCourseId(courseId);
     }
     if (sessionId != null) {
-      setExpandedSessionId(sessionId);
+      setOpenCourseSessionIds((current) => (current.includes(sessionId) ? current : [...current, sessionId]));
     }
   };
 
@@ -4626,7 +4735,7 @@ export default function DashboardPage() {
         priority: managingCoursePriority,
         sortOrder: Math.trunc(parsedSortOrder),
       });
-      await refreshCoursesPreserveView(course.id, expandedSessionId);
+      await refreshCoursesPreserveView(course.id, null);
       setCourseFeedback("Prioridad y orden del curso actualizados.", "success");
       setShowManageCourseModal(false);
       setManagingCourseId(null);
@@ -4671,7 +4780,7 @@ export default function DashboardPage() {
       setCourseSessionName("");
       setCourseSessionWeeklyContent("");
       setShowCreateCourseSessionModal(false);
-      await refreshCoursesPreserveView(openedCourseId, expandedSessionId);
+      await refreshCoursesPreserveView(openedCourseId, null);
       setCourseFeedback("Sesion creada correctamente.", "success");
     } catch (courseSessionError) {
       if (courseSessionError instanceof Error) {
@@ -4801,8 +4910,11 @@ export default function DashboardPage() {
     setCourseMessage("");
     try {
       await deleteJson(`/api/v1/courses/${resolvedCourseId}/sessions/${session.id}?userId=${user.id}`, user.token);
-      if (expandedSessionId === session.id) {
-        setExpandedSessionId(null);
+      setOpenCourseSessionIds((current) => current.filter((id) => id !== session.id));
+      const weekIds = new Set((session.weeks ?? []).map((week) => week.id));
+      if (weekIds.size > 0) {
+        setOpenCourseWeekIds((current) => current.filter((id) => !weekIds.has(id)));
+        setOpenCourseContentGroupIds((current) => current.filter((id) => !weekIds.has(id)));
       }
       if (editingCourseSessionId === session.id) {
         setShowEditCourseSessionModal(false);
@@ -4860,12 +4972,49 @@ export default function DashboardPage() {
     setEditingCourseCompetencyId(null);
   };
 
+  const isSessionOpen = (sessionId: number) => openCourseSessionIds.includes(sessionId);
+
+  const isWeekOpen = (weekId: number) => openCourseWeekIds.includes(weekId);
+
+  const isContentGroupOpen = (weekId: number) => openCourseContentGroupIds.includes(weekId);
+
+  const ensureSessionOpen = (sessionId: number) => {
+    setOpenCourseSessionIds((current) => (current.includes(sessionId) ? current : [...current, sessionId]));
+  };
+
+  const toggleWeekOpen = (weekId: number) => {
+    setOpenCourseWeekIds((current) => (current.includes(weekId) ? current.filter((id) => id !== weekId) : [...current, weekId]));
+  };
+
+  const toggleContentGroupOpen = (weekId: number) => {
+    setOpenCourseContentGroupIds((current) =>
+      current.includes(weekId) ? current.filter((id) => id !== weekId) : [...current, weekId],
+    );
+  };
+
   const onOpenSessionContent = (session: CourseSessionItem) => {
-    if (expandedSessionId === session.id) {
-      setExpandedSessionId(null);
+    if (isSessionOpen(session.id)) {
+      setOpenCourseSessionIds((current) => current.filter((id) => id !== session.id));
       return;
     }
-    setExpandedSessionId(session.id);
+    setOpenCourseSessionIds((current) => [...current, session.id]);
+    const weekIds = (session.weeks ?? []).map((week) => week.id);
+    if (weekIds.length > 0) {
+      setOpenCourseWeekIds((current) => {
+        const next = new Set(current);
+        for (const weekId of weekIds) {
+          next.add(weekId);
+        }
+        return [...next];
+      });
+      setOpenCourseContentGroupIds((current) => {
+        const next = new Set(current);
+        for (const weekId of weekIds) {
+          next.add(weekId);
+        }
+        return [...next];
+      });
+    }
     setCourseMessage("");
   };
 
@@ -8378,7 +8527,7 @@ export default function DashboardPage() {
             setOpenedCourseId(restoredContentContext.courseId);
           }
           if (restoredContentContext?.sessionId != null) {
-            setExpandedSessionId(restoredContentContext.sessionId);
+            ensureSessionOpen(restoredContentContext.sessionId);
           }
         }
         setSelectedExam(targetExam);
@@ -8533,7 +8682,7 @@ export default function DashboardPage() {
     rememberExamActionContext("cursos", context);
     setOpenedCourseId(context.courseId);
     setOpenedCourseTab("curso");
-    setExpandedSessionId(context.sessionId);
+    ensureSessionOpen(context.sessionId);
     if (active !== "cursos") {
       setActive("cursos");
     }
@@ -8550,7 +8699,7 @@ export default function DashboardPage() {
       }
       setOpenedCourseTab("curso");
       if (practiceOriginSessionId != null) {
-        setExpandedSessionId(practiceOriginSessionId);
+        ensureSessionOpen(practiceOriginSessionId);
       }
       setActive("cursos");
       return;
@@ -12492,7 +12641,9 @@ export default function DashboardPage() {
                         onClick={() => {
                           setOpenedCourseId(null);
                           setOpenedCourseTab("curso");
-                          setExpandedSessionId(null);
+                          setOpenCourseSessionIds([]);
+                          setOpenCourseWeekIds([]);
+                          setOpenCourseContentGroupIds([]);
                           setShowCreateCourseSessionModal(false);
                           setShowEditCourseSessionModal(false);
                           setEditingCourseSessionId(null);
@@ -12660,11 +12811,11 @@ export default function DashboardPage() {
                                       onClick={() => onOpenSessionContent(session)}
                                       className="rounded-md border border-blue-300 bg-white px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
                                     >
-                                      {expandedSessionId === session.id ? "Ocultar contenido" : "Abrir contenido"}
+                                      {isSessionOpen(session.id) ? "Ocultar contenido" : "Abrir contenido"}
                                     </button>
                                   </div>
                                 </div>
-                                {expandedSessionId === session.id ? (
+                                {isSessionOpen(session.id) ? (
                                   <div className="mt-3 space-y-3">
                                     {session.weeks && session.weeks.length > 0 ? (
                                       <div className="space-y-2">
@@ -12682,8 +12833,16 @@ export default function DashboardPage() {
                                                     <p className="truncate text-[10px] text-indigo-600">{week.description.trim()}</p>
                                                   ) : null}
                                                 </div>
+                                                <div className="flex items-center gap-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => toggleWeekOpen(week.id)}
+                                                    className="rounded-md border border-indigo-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-indigo-700 hover:bg-indigo-100"
+                                                  >
+                                                    {isWeekOpen(week.id) ? "Ocultar semana" : "Abrir semana"}
+                                                  </button>
                                                 {openedCourseIsOwner ? (
-                                                  <div className="flex items-center gap-1">
+                                                  <>
                                                     <button
                                                       type="button"
                                                       onClick={() => onOpenAddSessionContentModal(session, week.id)}
@@ -12706,12 +12865,24 @@ export default function DashboardPage() {
                                                     >
                                                       {deletingCourseWeekId === week.id ? "..." : "Eliminar"}
                                                     </button>
-                                                  </div>
+                                                  </>
                                                 ) : null}
+                                                </div>
                                               </div>
 
-                                              <div className="space-y-2">
-                                                {(() => {
+                                              {isWeekOpen(week.id) ? (
+                                                <div className="space-y-2">
+                                                  <div className="flex justify-end">
+                                                    <button
+                                                      type="button"
+                                                      onClick={() => toggleContentGroupOpen(week.id)}
+                                                      className="rounded-md border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-700 hover:bg-slate-100"
+                                                    >
+                                                      {isContentGroupOpen(week.id) ? "Ocultar contenidos" : "Abrir contenidos"}
+                                                    </button>
+                                                  </div>
+                                                  {isContentGroupOpen(week.id)
+                                                    ? (() => {
                                                   const weekContentsSource =
                                                     week.contents && week.contents.length > 0
                                                       ? week.contents
@@ -12909,8 +13080,10 @@ export default function DashboardPage() {
                                                       </div>
                                                     );
                                                   });
-                                                })()}
-                                              </div>
+                                                })()
+                                                    : null}
+                                                </div>
+                                              ) : null}
                                             </div>
                                           ))}
                                       </div>
