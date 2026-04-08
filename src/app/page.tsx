@@ -580,15 +580,47 @@ export default function Home() {
                 </button>
               </form>
 
-              <div className="mt-3">
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <button
                   type="button"
                   onClick={() => setRegisterOpen(true)}
                   disabled={loading || googleLoading || googleRegisterLoading || registerLoading}
-                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
                 >
-                  Registrarse con correo
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 19a6 6 0 0 0-12 0" />
+                    <circle cx="9" cy="7" r="4" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 8v6M16 11h6" />
+                  </svg>
+                  Registrarse
                 </button>
+
+                {latestApk ? (
+                  <a
+                    href={resolveApkDownloadUrl(latestApk.apkUrl)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" />
+                    </svg>
+                    Descargar APK
+                  </a>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-400"
+                  >
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v10m0 0 4-4m-4 4-4-4" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 17v1a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-1" />
+                    </svg>
+                    Descargar APK
+                  </button>
+                )}
               </div>
 
               <div className="mt-4">
@@ -608,26 +640,6 @@ export default function Home() {
                 </button>
                 {googleLoading ? <p className="mt-2 text-center text-xs text-slate-500">Procesando Google...</p> : null}
               </div>
-
-              {latestApk ? (
-                <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-sm font-semibold text-slate-800">APK Android disponible</p>
-                  <p className="mt-1 text-xs text-slate-600">
-                    Version {latestApk.versionName} ({latestApk.versionCode})
-                  </p>
-                  {latestApk.releaseNotes?.trim() ? (
-                    <p className="mt-2 text-xs text-slate-600">{latestApk.releaseNotes.trim()}</p>
-                  ) : null}
-                  <a
-                    href={resolveApkDownloadUrl(latestApk.apkUrl)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-3 inline-flex rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
-                  >
-                    Descargar APK
-                  </a>
-                </div>
-              ) : null}
 
               {googleRegisterOpen ? (
                 <div
