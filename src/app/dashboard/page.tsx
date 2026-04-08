@@ -721,6 +721,17 @@ type SupportModulePayload = {
 };
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
+
+function resolveDefaultPublicApiBase(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname === "smarterlearn.org" || hostname === "www.smarterlearn.org") {
+    return "https://api.smarterlearn.org";
+  }
+  return "";
+}
 const SESSION_EXPIRED_EVENT_NAME = "smartlearn:session-expired";
 const SESSION_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 const PRESENCE_HEARTBEAT_INTERVAL_MS = 45 * 1000;
@@ -21532,7 +21543,7 @@ function resolveApiUrl(path: string): string {
     return path;
   }
   if (path.startsWith("/api/")) {
-    const normalizedBase = API_BASE_URL.replace(/\/$/, "");
+    const normalizedBase = (API_BASE_URL || resolveDefaultPublicApiBase()).replace(/\/$/, "");
     let basePath = "";
 
     if (/^https?:\/\//i.test(normalizedBase)) {
