@@ -585,7 +585,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setRegisterOpen(true)}
                   disabled={loading || googleLoading || googleRegisterLoading || registerLoading}
-                  className="w-full rounded-lg border border-blue-300 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-70"
+                  className="w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-70"
                 >
                   Registrarse con correo
                 </button>
@@ -610,19 +610,19 @@ export default function Home() {
               </div>
 
               {latestApk ? (
-                <div className="mt-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                  <p className="text-sm font-semibold text-emerald-800">APK Android disponible</p>
-                  <p className="mt-1 text-xs text-emerald-700">
+                <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-semibold text-slate-800">APK Android disponible</p>
+                  <p className="mt-1 text-xs text-slate-600">
                     Version {latestApk.versionName} ({latestApk.versionCode})
                   </p>
                   {latestApk.releaseNotes?.trim() ? (
-                    <p className="mt-2 text-xs text-emerald-700">{latestApk.releaseNotes.trim()}</p>
+                    <p className="mt-2 text-xs text-slate-600">{latestApk.releaseNotes.trim()}</p>
                   ) : null}
                   <a
                     href={resolveApkDownloadUrl(latestApk.apkUrl)}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-3 inline-flex rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
+                    className="mt-3 inline-flex rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-800"
                   >
                     Descargar APK
                   </a>
