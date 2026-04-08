@@ -2342,6 +2342,7 @@ export default function DashboardPage() {
   const [androidCreateAsActive, setAndroidCreateAsActive] = useState(true);
   const [androidSavingRelease, setAndroidSavingRelease] = useState(false);
   const [androidActivatingReleaseId, setAndroidActivatingReleaseId] = useState<number | null>(null);
+  const [androidDeletingReleaseId, setAndroidDeletingReleaseId] = useState<number | null>(null);
   const [showCreateUserPanel, setShowCreateUserPanel] = useState(false);
   const [showManageRolesPanel, setShowManageRolesPanel] = useState(false);
   const [rolesLoading, setRolesLoading] = useState(false);
@@ -5782,6 +5783,32 @@ export default function DashboardPage() {
       }
     } finally {
       setAndroidActivatingReleaseId(null);
+    }
+  };
+
+  const onDeleteAndroidRelease = async (releaseId: number) => {
+    if (!user) {
+      return;
+    }
+    const confirmed = window.confirm("Esta accion eliminara la release Android seleccionada. Deseas continuar?");
+    if (!confirmed) {
+      return;
+    }
+
+    setAndroidDeletingReleaseId(releaseId);
+    setAndroidReleaseMessage("");
+    try {
+      await deleteJson(`/api/v1/admin/mobile/android/releases/${releaseId}`, user.token);
+      await refreshAndroidReleases();
+      setAndroidReleaseFeedback("Release Android eliminada correctamente.", "success");
+    } catch (deleteError) {
+      if (deleteError instanceof Error) {
+        setAndroidReleaseFeedback(deleteError.message, "error");
+      } else {
+        setAndroidReleaseFeedback("No se pudo eliminar la release Android.", "error");
+      }
+    } finally {
+      setAndroidDeletingReleaseId(null);
     }
   };
 
@@ -11920,14 +11947,28 @@ export default function DashboardPage() {
                         )}
                       </td>
                       <td className="border-b border-slate-100 px-3 py-2">
-                        <button
-                          type="button"
-                          disabled={release.isActive || androidActivatingReleaseId === release.id}
-                          onClick={() => void onActivateAndroidRelease(release.id)}
-                          className="rounded-lg border border-blue-300 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {androidActivatingReleaseId === release.id ? "Activando..." : "Activar"}
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={
+                              release.isActive ||
+                              androidActivatingReleaseId === release.id ||
+                              androidDeletingReleaseId === release.id
+                            }
+                            onClick={() => void onActivateAndroidRelease(release.id)}
+                            className="rounded-lg border border-blue-300 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {androidActivatingReleaseId === release.id ? "Activando..." : "Activar"}
+                          </button>
+                          <button
+                            type="button"
+                            disabled={androidActivatingReleaseId === release.id || androidDeletingReleaseId === release.id}
+                            onClick={() => void onDeleteAndroidRelease(release.id)}
+                            className="rounded-lg border border-rose-300 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {androidDeletingReleaseId === release.id ? "Eliminando..." : "Eliminar"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
