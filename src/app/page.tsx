@@ -87,6 +87,37 @@ declare global {
 const GOOGLE_CLIENT_ID =
   (process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ??
     "441996631829-cvhr6craa4kc3mbltlvcol2jbjsaeqi2.apps.googleusercontent.com").trim();
+const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
+
+function resolveDefaultPublicApiBase(): string {
+  if (typeof window === "undefined") {
+    return "";
+  }
+  const hostname = window.location.hostname.toLowerCase();
+  if (hostname === "smarterlearn.org" || hostname === "www.smarterlearn.org") {
+    return "https://api.smarterlearn.org";
+  }
+  return "";
+}
+
+function resolveApiPath(path: string): string {
+  if (/^https?:\/\//i.test(path)) {
+    return path;
+  }
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const runtimeBase = API_BASE_URL || resolveDefaultPublicApiBase();
+  if (runtimeBase) {
+    return `${runtimeBase}${normalizedPath}`;
+  }
+  return normalizedPath;
+}
+
+function resolveApkDownloadUrl(apkUrl: string): string {
+  if (/^https?:\/\//i.test(apkUrl)) {
+    return apkUrl;
+  }
+  return resolveApiPath(apkUrl);
+}
 
 async function readJsonPayload<T>(response: Response): Promise<T & { error?: string; message?: string }> {
   try {
@@ -156,7 +187,7 @@ export default function Home() {
     let cancelled = false;
     const loadLatestApk = async () => {
       try {
-        const response = await fetch("/api/v1/public/mobile/android/latest", { cache: "no-store" });
+        const response = await fetch(resolveApiPath("/api/v1/public/mobile/android/latest"), { cache: "no-store" });
         if (!response.ok) {
           return;
         }
@@ -185,7 +216,7 @@ export default function Home() {
       setGoogleLoading(true);
       setError("");
       try {
-        const response = await fetch("/api/v1/auth/google/login", {
+        const response = await fetch(resolveApiPath("/api/v1/auth/google/login"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -292,7 +323,7 @@ export default function Home() {
     setError("");
 
     try {
-      const response = await fetch("/api/v1/auth/login", {
+      const response = await fetch(resolveApiPath("/api/v1/auth/login"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -340,7 +371,7 @@ export default function Home() {
 
     setGoogleRegisterLoading(true);
     try {
-      const response = await fetch("/api/v1/auth/google/register", {
+      const response = await fetch(resolveApiPath("/api/v1/auth/google/register"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -395,7 +426,7 @@ export default function Home() {
 
     setRegisterLoading(true);
     try {
-      const response = await fetch("/api/v1/auth/register", {
+      const response = await fetch(resolveApiPath("/api/v1/auth/register"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -588,7 +619,7 @@ export default function Home() {
                     <p className="mt-2 text-xs text-emerald-700">{latestApk.releaseNotes.trim()}</p>
                   ) : null}
                   <a
-                    href={latestApk.apkUrl}
+                    href={resolveApkDownloadUrl(latestApk.apkUrl)}
                     target="_blank"
                     rel="noreferrer"
                     className="mt-3 inline-flex rounded-lg bg-emerald-700 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
