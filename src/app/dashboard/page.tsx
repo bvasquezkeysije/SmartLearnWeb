@@ -2343,6 +2343,8 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [payload, setPayload] = useState<unknown>(null);
   const [lastCoursesPayload, setLastCoursesPayload] = useState<unknown>(null);
+  const [courseAvailableExamsCache, setCourseAvailableExamsCache] = useState<CourseExamItem[] | null>(null);
+  const [courseAvailableExamsLoading, setCourseAvailableExamsLoading] = useState(false);
   const [userSearch, setUserSearch] = useState("");
   const [userPerPage, setUserPerPage] = useState("10");
   const [userStatusFilter, setUserStatusFilter] = useState<"all" | "active" | "inactive">("all");
@@ -4477,6 +4479,55 @@ export default function DashboardPage() {
     setPayload(courses);
   };
 
+  const loadCourseAvailableExams = useCallback(
+    async (force = false): Promise<CourseExamItem[]> => {
+      if (!user) {
+        return [];
+      }
+      if (!force && courseAvailableExamsCache != null) {
+        return courseAvailableExamsCache;
+      }
+      setCourseAvailableExamsLoading(true);
+      try {
+        const raw = await fetchJson(`/api/v1/courses/module-exams?userId=${user.id}`, user.token);
+        const exams = Array.isArray(raw) ? raw.filter((item) => isCourseExamItemPayload(item)) : [];
+        setCourseAvailableExamsCache(exams);
+        setCourseExamCatalogById((previous) => {
+          const next = { ...previous };
+          for (const exam of exams) {
+            next[exam.id] = toExamSummaryFromCourseExam(exam);
+          }
+          return next;
+        });
+        return exams;
+      } catch {
+        return [];
+      } finally {
+        setCourseAvailableExamsLoading(false);
+      }
+    },
+    [user, courseAvailableExamsCache],
+  );
+
+  const upsertCourseInModuleState = useCallback(
+    (updatedCourse: CourseItem) => {
+      setPayload((current) => {
+        const base = isCourseModulePayloadShape(current) ? current : lastCoursesPayload;
+        const modulePayload = parseCourseModulePayload(base);
+        const nextCourses = modulePayload.courses.some((course) => course.id === updatedCourse.id)
+          ? modulePayload.courses.map((course) => (course.id === updatedCourse.id ? updatedCourse : course))
+          : [updatedCourse, ...modulePayload.courses];
+        const nextPayload = {
+          courses: nextCourses,
+          availableExams: courseAvailableExamsCache ?? modulePayload.availableExams,
+        };
+        setLastCoursesPayload(nextPayload);
+        return nextPayload;
+      });
+    },
+    [lastCoursesPayload, courseAvailableExamsCache],
+  );
+
   const refreshCoursesPreserveView = async (
     courseId?: number | null,
     sessionId?: number | null,
@@ -5673,14 +5724,14 @@ export default function DashboardPage() {
     setAddingCourseParticipant(true);
     setCourseMessage("");
     try {
-      await postJson(`/api/v1/courses/${openedCourseId}/participants`, user.token, {
+      const updatedCourse = (await postJson(`/api/v1/courses/${openedCourseId}/participants`, user.token, {
         userId: user.id,
         identifier: normalizedIdentifier,
         role: courseParticipantRole,
-      });
+      })) as CourseItem;
       setCourseParticipantIdentifier("");
       setCourseParticipantRole("viewer");
-      await refreshCourses();
+      upsertCourseInModuleState(updatedCourse);
       setCourseFeedback("Participante agregado correctamente.", "success");
     } catch (participantError) {
       if (participantError instanceof Error) {
@@ -5704,11 +5755,11 @@ export default function DashboardPage() {
     setSavingCourseParticipantUserId(participantUserId);
     setCourseMessage("");
     try {
-      await patchJson(`/api/v1/courses/${openedCourseId}/participants/${participantUserId}`, user.token, {
+      const updatedCourse = (await patchJson(`/api/v1/courses/${openedCourseId}/participants/${participantUserId}`, user.token, {
         userId: user.id,
         role,
-      });
-      await refreshCourses();
+      })) as CourseItem;
+      upsertCourseInModuleState(updatedCourse);
       setCourseFeedback("Rol de participante actualizado.", "success");
     } catch (participantRoleError) {
       if (participantRoleError instanceof Error) {
@@ -5773,11 +5824,16 @@ export default function DashboardPage() {
 
     try {
       if (editingCourseCompetencyId == null) {
-        await postJson(`/api/v1/courses/${openedCourseId}/competencies`, user.token, body);
+        const updatedCourse = (await postJson(`/api/v1/courses/${openedCourseId}/competencies`, user.token, body)) as CourseItem;
+        upsertCourseInModuleState(updatedCourse);
       } else {
-        await patchJson(`/api/v1/courses/${openedCourseId}/competencies/${editingCourseCompetencyId}`, user.token, body);
+        const updatedCourse = (await patchJson(
+          `/api/v1/courses/${openedCourseId}/competencies/${editingCourseCompetencyId}`,
+          user.token,
+          body,
+        )) as CourseItem;
+        upsertCourseInModuleState(updatedCourse);
       }
-      await refreshCourses();
       resetCourseCompetencyEditor();
       setCourseFeedback("Competencia guardada correctamente.", "success");
     } catch (competencyError) {
@@ -7783,12 +7839,13 @@ export default function DashboardPage() {
       return;
     }
     const modulePayload = parseCourseModulePayload(payload);
-    if (modulePayload.availableExams.length === 0) {
+    const examsForCatalog = courseAvailableExamsCache ?? modulePayload.availableExams;
+    if (examsForCatalog.length === 0) {
       return;
     }
     setCourseExamCatalogById((previous) => {
       const next = { ...previous };
-      for (const examItem of modulePayload.availableExams) {
+      for (const examItem of examsForCatalog) {
         if (!examItem || typeof examItem.id !== "number") {
           continue;
         }
@@ -7796,36 +7853,14 @@ export default function DashboardPage() {
       }
       return next;
     });
-  }, [active, payload]);
+  }, [active, payload, courseAvailableExamsCache]);
 
   useEffect(() => {
-    if (!user || active !== "cursos") {
+    if (!user || active !== "cursos" || !showAddSessionContentModal || sessionContentType !== "examen") {
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const exams = (await fetchJson(`/api/v1/exams?userId=${user.id}`, user.token)) as ExamSummary[];
-        if (cancelled || !Array.isArray(exams)) {
-          return;
-        }
-        setCourseExamCatalogById((previous) => {
-          const next = { ...previous };
-          for (const exam of exams) {
-            if (exam && typeof exam.id === "number") {
-              next[exam.id] = exam;
-            }
-          }
-          return next;
-        });
-      } catch {
-        // silencio
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [user, active]);
+    void loadCourseAvailableExams(false);
+  }, [user, active, showAddSessionContentModal, sessionContentType, loadCourseAvailableExams]);
 
   useEffect(() => {
     if (!user || active !== "cursos" || openedCourseId == null) {
@@ -12272,7 +12307,7 @@ export default function DashboardPage() {
     if (active === "cursos") {
       const data = parseCourseModulePayload(payload);
       const courses = data.courses;
-      const availableExams = data.availableExams;
+      const availableExams = courseAvailableExamsCache ?? data.availableExams;
       const years = Array.from(
         new Set(
           courses
@@ -13912,9 +13947,10 @@ export default function DashboardPage() {
                     <select
                       value={sessionExamSourceId}
                       onChange={(event) => setSessionExamSourceId(event.target.value)}
+                      disabled={courseAvailableExamsLoading}
                       className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-slate-900 outline-none focus:border-blue-400"
                     >
-                      <option value="">Selecciona un examen</option>
+                      <option value="">{courseAvailableExamsLoading ? "Cargando examenes..." : "Selecciona un examen"}</option>
                       {availableExams.map((exam) => (
                         <option key={exam.id} value={String(exam.id)}>
                           {exam.name}
