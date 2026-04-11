@@ -16628,14 +16628,15 @@ export default function DashboardPage() {
                         .sort((a, b) =>
                           manualQuestionOrder === "newest" ? b.id - a.id : a.id - b.id,
                         ))
-                        .map((question) => (
+                        .map((question, index) => (
                           <li key={question.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                             <div className="flex items-start justify-between gap-2">
                               <div>
                                 <p className="text-sm font-semibold text-slate-900">
-                                  #{question.id} {question.questionText}
+                                  Pregunta {index + 1}: {question.questionText}
                                 </p>
                                 <p className="text-xs text-slate-600">
+                                  ID #{question.id} |{" "}
                                   {questionTypeLabel(question.questionType)} | Puntaje: {question.points ?? 0} |
                                   Temporizador: {question.temporizadorSegundos ?? 0}s | Revision: {question.reviewSeconds ?? 10}s
                                 </p>
@@ -20655,14 +20656,15 @@ export default function DashboardPage() {
                             .sort((a, b) =>
                               manualQuestionOrder === "newest" ? b.id - a.id : a.id - b.id,
                             )
-                            .map((question) => (
+                            .map((question, index) => (
                               <li key={question.id} className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                                 <div className="flex items-start justify-between gap-2">
                                   <div>
                                     <p className="text-sm font-semibold text-slate-900">
-                                      #{question.id} {question.questionText}
+                                      Pregunta {index + 1}: {question.questionText}
                                     </p>
                                     <p className="text-xs text-slate-600">
+                                      ID #{question.id} |{" "}
                                       {questionTypeLabel(question.questionType)} | Puntaje: {question.points ?? 0} |
                                       Temporizador: {question.temporizadorSegundos ?? 0}s | Revision: {question.reviewSeconds ?? 10}s
                                     </p>
