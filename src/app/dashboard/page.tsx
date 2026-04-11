@@ -3473,7 +3473,7 @@ export default function DashboardPage() {
           return;
         }
         if (active === "cursos") {
-          setPayload(await fetchJson(`/api/v1/courses?userId=${userId}`, token));
+          setPayload(await fetchJson(`/api/v1/courses?userId=${userId}&includeAvailableExams=false`, token));
           return;
         }
         if (active === "horarios") {
@@ -4474,7 +4474,7 @@ export default function DashboardPage() {
     if (!user) {
       return;
     }
-    const courses = await fetchJson(`/api/v1/courses?userId=${user.id}`, user.token);
+    const courses = await fetchJson(`/api/v1/courses?userId=${user.id}&includeAvailableExams=false`, user.token);
     setLastCoursesPayload(courses);
     setPayload(courses);
   };
