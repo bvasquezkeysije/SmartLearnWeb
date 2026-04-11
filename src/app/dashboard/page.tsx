@@ -156,6 +156,7 @@ type ExamGroupRankingEntry = {
 
 type ExamGroupState = {
   sessionId: number;
+  roomSessionToken?: string | null;
   examId: number;
   examName: string;
   status: "waiting" | "active" | "finished" | string;
@@ -301,6 +302,7 @@ const mergeGroupState = (previous: ExamGroupState | null, incoming: ExamGroupSta
 
   return {
     ...incoming,
+    roomSessionToken: incoming.roomSessionToken ?? previous.roomSessionToken ?? null,
     participants: mergedParticipants,
     currentAnswers: mergedAnswers,
   };
@@ -8448,6 +8450,7 @@ export default function DashboardPage() {
       JSON.stringify({
         examId: selectedExam.id,
         sessionId: groupPracticeState.sessionId,
+        roomSessionToken: groupPracticeState.roomSessionToken ?? null,
         originSection: practiceOriginSection,
         courseId: activeExamContentContext?.courseId ?? null,
         courseSessionId: activeExamContentContext?.sessionId ?? null,
@@ -8487,6 +8490,7 @@ export default function DashboardPage() {
     let parsed: {
       examId?: unknown;
       sessionId?: unknown;
+      roomSessionToken?: unknown;
       originSection?: unknown;
       courseId?: unknown;
       courseSessionId?: unknown;
@@ -8496,6 +8500,7 @@ export default function DashboardPage() {
       parsed = JSON.parse(rawStored) as {
         examId?: unknown;
         sessionId?: unknown;
+        roomSessionToken?: unknown;
         originSection?: unknown;
         courseId?: unknown;
         courseSessionId?: unknown;
@@ -8508,6 +8513,7 @@ export default function DashboardPage() {
 
     const examId = Number(parsed.examId);
     const sessionId = Number(parsed.sessionId);
+    const restoredRoomSessionToken = typeof parsed.roomSessionToken === "string" ? parsed.roomSessionToken.trim() : "";
     if (!Number.isFinite(examId) || examId <= 0 || !Number.isFinite(sessionId) || sessionId <= 0) {
       removeStored();
       return;
@@ -8548,8 +8554,11 @@ export default function DashboardPage() {
           ? `/api/v1/courses/${restoredContentContext.courseId}/sessions/${restoredContentContext.sessionId}/contents/${restoredContentContext.contentId}/exam-practice`
           : `/api/v1/exams/${targetExam.id}/practice`;
         const stateParamName = restoredContentContext ? "sessionGroupId" : "sessionId";
+        const roomSessionTokenParam = restoredRoomSessionToken
+          ? `&roomSessionToken=${encodeURIComponent(restoredRoomSessionToken)}`
+          : "";
         const state = (await fetchJson(
-          `${basePath}/group/state?userId=${user.id}&${stateParamName}=${sessionId}&ts=${Date.now()}`,
+          `${basePath}/group/state?userId=${user.id}&${stateParamName}=${sessionId}${roomSessionTokenParam}&ts=${Date.now()}`,
           user.token,
         )) as ExamGroupState;
         const status = (state.status ?? "").toLowerCase();
@@ -9639,6 +9648,7 @@ export default function DashboardPage() {
       });
       const state = (await postJson(joinEndpoint, user.token, {
         userId: user.id,
+        roomSessionToken: groupPracticeState?.roomSessionToken ?? null,
       })) as ExamGroupState;
       setGroupPracticeState(state);
       setShowPracticeModal(false);
@@ -9728,6 +9738,7 @@ export default function DashboardPage() {
       });
       const state = (await postJson(createEndpoint, user.token, {
         userId: user.id,
+        roomSessionToken: groupPracticeState?.roomSessionToken ?? null,
       })) as ExamGroupState;
       setGroupPracticeState((previous) => mergeGroupState(previous, state));
       setShowPracticeModal(false);
@@ -9777,6 +9788,7 @@ export default function DashboardPage() {
         {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
+        roomSessionToken: groupPracticeState.roomSessionToken ?? null,
       },
       )) as ExamGroupState;
       setGroupPracticeState((previous) => mergeGroupState(previous, state));
@@ -9844,6 +9856,7 @@ export default function DashboardPage() {
         selectedOption: currentQuestion.questionType === "multiple_choice" ? selectedOptionForCurrentQuestion : null,
         writtenAnswer:
           currentQuestion.questionType === "multiple_choice" ? null : writtenAnswerForCurrentQuestion || null,
+        roomSessionToken: groupPracticeState.roomSessionToken ?? null,
       },
       )) as ExamGroupState;
       let resolvedState: ExamGroupState = state;
@@ -9913,6 +9926,7 @@ export default function DashboardPage() {
         {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
+        roomSessionToken: groupPracticeState.roomSessionToken ?? null,
       },
       )) as ExamGroupState;
       setGroupPracticeState((previous) => mergeGroupState(previous, state));
@@ -9972,12 +9986,14 @@ export default function DashboardPage() {
         await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/close`, user.token, {
           userId: user.id,
           sessionId: groupPracticeState.sessionId,
+          roomSessionToken: groupPracticeState.roomSessionToken ?? null,
         });
       }
 
       const waitingState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/restart`, user.token, {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
+        roomSessionToken: groupPracticeState.roomSessionToken ?? null,
       })) as ExamGroupState;
       applyWaitingGroupState(waitingState, "Examen grupal finalizado. Todos volvieron a sala de espera.");
       await refreshExams({ preserveCurrentPayload: practiceOriginSection === "cursos" });
@@ -9985,11 +10001,13 @@ export default function DashboardPage() {
       try {
         const latestState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/join`, user.token, {
           userId: user.id,
+          roomSessionToken: groupPracticeState.roomSessionToken ?? null,
         })) as ExamGroupState;
 
         const waitingState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/restart`, user.token, {
           userId: user.id,
           sessionId: latestState.sessionId,
+          roomSessionToken: latestState.roomSessionToken ?? null,
         })) as ExamGroupState;
 
         applyWaitingGroupState(waitingState, "Examen grupal finalizado y enviado a espera con la sesion mas reciente.");
@@ -9998,6 +10016,7 @@ export default function DashboardPage() {
         try {
           const createdWaitingState = (await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/create`, user.token, {
             userId: user.id,
+            roomSessionToken: groupPracticeState.roomSessionToken ?? null,
           })) as ExamGroupState;
           applyWaitingGroupState(createdWaitingState, "No habia sesion activa. Se creo una nueva sala en espera.");
           await refreshExams({ preserveCurrentPayload: Boolean(activeExamContentContext) });
@@ -10357,6 +10376,7 @@ export default function DashboardPage() {
       await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/close`, user.token, {
         userId: user.id,
         sessionId: groupPracticeState.sessionId,
+        roomSessionToken: groupPracticeState.roomSessionToken ?? null,
       });
 
       onCloseGroupPracticeRunner();
@@ -10392,6 +10412,9 @@ export default function DashboardPage() {
       return;
     }
     const sessionId = groupPracticeState.sessionId;
+    const roomSessionTokenQuery = groupPracticeState.roomSessionToken
+      ? `&roomSessionToken=${encodeURIComponent(groupPracticeState.roomSessionToken)}`
+      : "";
     const examId = selectedExam.id;
 
     const applyLatestSessionState = (latestState: ExamGroupState) => {
@@ -10430,7 +10453,7 @@ export default function DashboardPage() {
         groupStatePollInFlightRef.current = true;
         try {
           const state = (await fetchJson(
-            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${user.id}&${activeExamContentContext ? "sessionGroupId" : "sessionId"}=${sessionId}&ts=${Date.now()}`,
+            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${user.id}&${activeExamContentContext ? "sessionGroupId" : "sessionId"}=${sessionId}${roomSessionTokenQuery}&ts=${Date.now()}`,
             user.token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, state));
@@ -10457,6 +10480,7 @@ export default function DashboardPage() {
           try {
             const latestState = (await postJson(`${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/join`, user.token, {
               userId: user.id,
+              roomSessionToken: groupPracticeState.roomSessionToken ?? null,
             })) as ExamGroupState;
             if (latestState && latestState.sessionId !== sessionId) {
               applyLatestSessionState(latestState);
@@ -10731,6 +10755,9 @@ export default function DashboardPage() {
         return;
       }
       const sessionId = groupPracticeState.sessionId;
+      const roomSessionTokenQuery = groupPracticeState.roomSessionToken
+        ? `&roomSessionToken=${encodeURIComponent(groupPracticeState.roomSessionToken)}`
+        : "";
       const examId = selectedExam.id;
       const userId = user.id;
       const token = user.token;
@@ -10738,7 +10765,7 @@ export default function DashboardPage() {
       void (async () => {
         try {
           const freshState = (await fetchJson(
-            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${userId}&${activeExamContentContext ? "sessionGroupId" : "sessionId"}=${sessionId}&ts=${Date.now()}`,
+            `${resolveExamPracticeBasePath(examId, activeExamContentContext)}/group/state?userId=${userId}&${activeExamContentContext ? "sessionGroupId" : "sessionId"}=${sessionId}${roomSessionTokenQuery}&ts=${Date.now()}`,
             token,
           )) as ExamGroupState;
           setGroupPracticeState((previous) => mergeGroupState(previous, freshState));
