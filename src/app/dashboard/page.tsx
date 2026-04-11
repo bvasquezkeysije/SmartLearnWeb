@@ -19994,13 +19994,13 @@ export default function DashboardPage() {
         ) : null}
 
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <header className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 px-3 py-3 text-white sm:px-5">
+          <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-3 py-3 text-slate-900 sm:px-5">
             <div className="flex min-w-0 flex-1 items-center gap-2.5 sm:gap-3">
               <button
                 type="button"
                 onClick={() => setSidebarOpen((value) => !value)}
                 aria-label={sidebarOpen ? "Ocultar menu lateral" : "Mostrar menu lateral"}
-                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-white/20 bg-white/10 text-white hover:bg-white/20"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
               >
                 <svg
                   xmlns="http://www.w3.org/2000/svg"
@@ -20014,7 +20014,20 @@ export default function DashboardPage() {
                 </svg>
               </button>
 
-              <Image src="/smartlearn.png" alt="SmartLearn" width={120} height={32} className="h-7 w-auto sm:h-8" />
+              <Image
+                src="/aprendemos-h-r.PNG"
+                alt="SmartLearn"
+                width={104}
+                height={28}
+                className="h-7 w-auto lg:hidden"
+              />
+              <Image
+                src="/aprendemos-h.png"
+                alt="SmartLearn"
+                width={120}
+                height={32}
+                className="hidden h-7 w-auto sm:h-8 lg:block"
+              />
               <span className="hidden max-w-[10rem] truncate text-xs font-semibold uppercase tracking-wide md:inline lg:max-w-[14rem]">
                 {active || "panel"}
               </span>
@@ -20028,7 +20041,7 @@ export default function DashboardPage() {
                   setNotificationPanelOpen(false);
                   setUserMenuOpen(false);
                 }}
-                className="inline-flex h-10 items-center gap-2 rounded-lg border border-cyan-300/40 bg-cyan-500/15 px-3 text-xs font-semibold uppercase tracking-wide leading-none text-cyan-100 transition-colors hover:bg-cyan-500/30 sm:h-11 sm:px-4 sm:text-sm"
+                className="inline-flex h-10 items-center gap-2 rounded-lg border border-cyan-300 bg-cyan-50 px-3 text-xs font-semibold uppercase tracking-wide leading-none text-cyan-800 transition-colors hover:bg-cyan-100 sm:h-11 sm:px-4 sm:text-sm"
                 title={`Ver tutorial de ${activeTutorialGuide.sectionTitle}`}
               >
                 <svg
@@ -20052,7 +20065,7 @@ export default function DashboardPage() {
                     setNotificationPanelOpen((value) => !value);
                     setUserMenuOpen(false);
                   }}
-                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-white/20 bg-white/10 text-white transition-colors hover:bg-white/20 sm:h-11 sm:w-11"
+                  className="relative inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 transition-colors hover:bg-slate-100 sm:h-11 sm:w-11"
                   aria-label="Notificaciones"
                   aria-expanded={notificationPanelOpen}
                   title="Notificaciones"
@@ -20222,9 +20235,9 @@ export default function DashboardPage() {
                     setUserMenuOpen((value) => !value);
                     setNotificationPanelOpen(false);
                   }}
-                  className="inline-flex h-10 min-w-0 max-w-[11.5rem] items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-2.5 text-xs font-semibold uppercase tracking-wide leading-none text-white transition-colors hover:bg-white/20 sm:h-11 sm:max-w-[16rem] sm:px-3.5 sm:text-sm"
+                  className="inline-flex h-10 min-w-0 max-w-[11.5rem] items-center gap-2 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold uppercase tracking-wide leading-none text-slate-800 transition-colors hover:bg-slate-100 sm:h-11 sm:max-w-[16rem] sm:px-3.5 sm:text-sm"
                 >
-                  <span className="relative h-8 w-8 overflow-hidden rounded-full border border-white/25 bg-white/20 text-xs font-bold text-white">
+                  <span className="relative h-8 w-8 overflow-hidden rounded-full border border-slate-300 bg-slate-100 text-xs font-bold text-slate-700">
                     {profileImageData ? (
                       <img
                         src={profileImageData}
