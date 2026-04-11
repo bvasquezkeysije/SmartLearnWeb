@@ -472,22 +472,7 @@ export default function Home() {
           <div className="flex min-h-screen w-full items-center justify-center p-6 sm:p-8 lg:p-10">
             <div className="w-full max-w-xl">
               <div className="mb-6 flex justify-center">
-                <Image
-                  src="/aprendemos-h-r.PNG"
-                  alt="Logo SmartLearn"
-                  width={220}
-                  height={62}
-                  priority
-                  className="h-auto w-auto lg:hidden"
-                />
-                <Image
-                  src="/aprendemos-h.png"
-                  alt="Logo SmartLearn"
-                  width={300}
-                  height={84}
-                  priority
-                  className="hidden h-auto w-auto lg:block"
-                />
+                <Image src="/aprendemos.png" alt="Logo SmartLearn" width={300} height={84} priority />
               </div>
 
               <div className="mb-7 text-center">
