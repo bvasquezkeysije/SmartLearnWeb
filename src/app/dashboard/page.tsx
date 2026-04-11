@@ -21617,14 +21617,16 @@ function isAuthFailureResponse(status: number, data: ApiResponsePayload): boolea
 
   const errorText = String(data.error ?? "").toLowerCase();
   const messageText = String(data.message ?? "").toLowerCase();
-  const combined = `${errorText} ${messageText}`;
+  const combined = `${errorText} ${messageText}`.replace(/\s+/g, " ").trim();
 
+  // Fallback defensivo solo para respuestas legacy sin authError.
+  // No usar palabras amplias como "sesion" porque generan falsos positivos
+  // en errores funcionales de repaso grupal.
   return (
-    combined.includes("token") ||
-    combined.includes("sesion") ||
-    combined.includes("session") ||
-    combined.includes("inactivo") ||
-    combined.includes("credenciales invalidas")
+    combined.includes("token ausente o invalido") ||
+    combined.includes("token inválido") ||
+    combined.includes("token invalido") ||
+    combined.includes("usuario inactivo")
   );
 }
 
