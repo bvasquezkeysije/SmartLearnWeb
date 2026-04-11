@@ -4509,23 +4509,25 @@ export default function DashboardPage() {
     [user, courseAvailableExamsCache],
   );
 
+  const invalidateCourseAvailableExamsCache = useCallback(() => {
+    setCourseAvailableExamsCache(null);
+  }, []);
+
   const upsertCourseInModuleState = useCallback(
     (updatedCourse: CourseItem) => {
-      setPayload((current) => {
-        const base = isCourseModulePayloadShape(current) ? current : lastCoursesPayload;
-        const modulePayload = parseCourseModulePayload(base);
-        const nextCourses = modulePayload.courses.some((course) => course.id === updatedCourse.id)
-          ? modulePayload.courses.map((course) => (course.id === updatedCourse.id ? updatedCourse : course))
-          : [updatedCourse, ...modulePayload.courses];
-        const nextPayload = {
-          courses: nextCourses,
-          availableExams: courseAvailableExamsCache ?? modulePayload.availableExams,
-        };
-        setLastCoursesPayload(nextPayload);
-        return nextPayload;
-      });
+      const base = isCourseModulePayloadShape(payload) ? payload : lastCoursesPayload;
+      const modulePayload = parseCourseModulePayload(base);
+      const nextCourses = modulePayload.courses.some((course) => course.id === updatedCourse.id)
+        ? modulePayload.courses.map((course) => (course.id === updatedCourse.id ? updatedCourse : course))
+        : [updatedCourse, ...modulePayload.courses];
+      const nextPayload = {
+        courses: nextCourses,
+        availableExams: courseAvailableExamsCache ?? modulePayload.availableExams,
+      };
+      setLastCoursesPayload(nextPayload);
+      setPayload(nextPayload);
     },
-    [lastCoursesPayload, courseAvailableExamsCache],
+    [payload, lastCoursesPayload, courseAvailableExamsCache],
   );
 
   const refreshCoursesPreserveView = async (
@@ -5547,6 +5549,7 @@ export default function DashboardPage() {
         userId: user.id,
         visible: targetVisible,
       });
+      invalidateCourseAvailableExamsCache();
       setAnchoredExamVisibilityById((previous) => ({ ...previous, [examId]: targetVisible }));
       await refreshExams({ preserveCurrentPayload: true });
       setCourseFeedback(
@@ -8797,6 +8800,7 @@ export default function DashboardPage() {
         userId: user.id,
         examName: nextName,
       })) as ExamSummary;
+      invalidateCourseAvailableExamsCache();
       replaceExamInPayload(updatedExam);
       setCourseExamCatalogById((previous) => ({ ...previous, [updatedExam.id]: updatedExam }));
       if (selectedExam && selectedExam.id === renameExamTarget.id) {
@@ -8949,6 +8953,8 @@ export default function DashboardPage() {
         manualExamName: manualExamName.trim(),
       })) as ExamSummary;
 
+      invalidateCourseAvailableExamsCache();
+
       const current = Array.isArray(payload) ? (payload as ExamSummary[]) : [];
       setPayload([created, ...current]);
       setManualExamName("");
@@ -8979,6 +8985,7 @@ export default function DashboardPage() {
       formData.append("examFile", uploadExamFile);
 
       await postFormData("/api/v1/exams", user.token, formData);
+      invalidateCourseAvailableExamsCache();
       await refreshExams();
 
       setUploadExamName("");
@@ -9083,6 +9090,7 @@ export default function DashboardPage() {
       void _contentContext;
       const deletePath = `/api/v1/exams/${exam.id}?userId=${user.id}`;
       await deleteJson(deletePath, user.token);
+      invalidateCourseAvailableExamsCache();
       await refreshExams({ preserveCurrentPayload: true });
       setCourseExamCatalogById((previous) => {
         const next = { ...previous };
@@ -9229,6 +9237,7 @@ export default function DashboardPage() {
         questionsCount: refreshedQuestions.length,
       };
       setSelectedExam(updatedExam);
+      invalidateCourseAvailableExamsCache();
       replaceExamInPayload(updatedExam);
       setCourseExamCatalogById((previous) => ({ ...previous, [updatedExam.id]: updatedExam }));
       if (manageExamContentContext) {
@@ -9352,6 +9361,7 @@ export default function DashboardPage() {
 
       setSelectedExam(updated);
       setCourseExamCatalogById((previous) => ({ ...previous, [updated.id]: updated }));
+      invalidateCourseAvailableExamsCache();
       if (practiceSettingsContentContext) {
         await refreshCoursesPreserveView(
           practiceSettingsContentContext.courseId,
