@@ -21682,6 +21682,8 @@ function emitSessionExpiredEvent(reason: "inactive" | "unauthorized") {
   window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT_NAME, { detail: { reason } }));
 }
 
+let authSessionRecheckPromise: Promise<boolean> | null = null;
+
 function isAuthFailureResponse(status: number, data: ApiResponsePayload): boolean {
   if (status !== 401) {
     return false;
@@ -21705,8 +21707,47 @@ function isAuthFailureResponse(status: number, data: ApiResponsePayload): boolea
   );
 }
 
-function handleSessionErrorStatus(status: number, data: ApiResponsePayload) {
-  if (isAuthFailureResponse(status, data)) {
+async function confirmAuthSessionExpiredByServer(): Promise<boolean> {
+  if (typeof window === "undefined") {
+    return true;
+  }
+  if (authSessionRecheckPromise) {
+    return authSessionRecheckPromise;
+  }
+
+  authSessionRecheckPromise = (async () => {
+    const token = window.localStorage.getItem("smartlearn_token");
+    if (!token) {
+      return true;
+    }
+    try {
+      const response = await fetch(resolveApiUrl("/api/v1/auth/session"), {
+        cache: "no-store",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (response.ok) {
+        return false;
+      }
+      return response.status === 401;
+    } catch {
+      // Si hay fallo de red/transitorio, no tumbar sesion global.
+      return false;
+    } finally {
+      authSessionRecheckPromise = null;
+    }
+  })();
+
+  return authSessionRecheckPromise;
+}
+
+async function handleSessionErrorStatus(status: number, data: ApiResponsePayload) {
+  if (!isAuthFailureResponse(status, data)) {
+    return;
+  }
+  const confirmedExpired = await confirmAuthSessionExpiredByServer();
+  if (confirmedExpired) {
     emitSessionExpiredEvent("unauthorized");
   }
 }
@@ -21775,7 +21816,7 @@ async function fetchJson(path: string, token: string): Promise<unknown> {
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status, data);
+    await handleSessionErrorStatus(response.status, data);
     throw buildApiError("Error consultando API", response.status, path, data);
   }
 
@@ -21795,7 +21836,7 @@ async function postJson(path: string, token: string, body: unknown): Promise<unk
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status, data);
+    await handleSessionErrorStatus(response.status, data);
     const apiError = buildApiError("Error procesando solicitud", response.status, path, data);
     throw new ApiHttpError(`${apiError.message} (HTTP ${response.status} POST ${path})`, response.status, path, apiError.authFailure);
   }
@@ -21816,7 +21857,7 @@ async function patchJson(path: string, token: string, body: unknown): Promise<un
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status, data);
+    await handleSessionErrorStatus(response.status, data);
     throw buildApiError("Error actualizando", response.status, path, data);
   }
 
@@ -21836,7 +21877,7 @@ async function putJson(path: string, token: string, body: unknown): Promise<unkn
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status, data);
+    await handleSessionErrorStatus(response.status, data);
     throw buildApiError("Error actualizando", response.status, path, data);
   }
 
@@ -21855,7 +21896,7 @@ async function postFormData(path: string, token: string, formData: FormData): Pr
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status, data);
+    await handleSessionErrorStatus(response.status, data);
     throw buildApiError("Error subiendo archivo", response.status, path, data);
   }
 
@@ -21877,7 +21918,7 @@ async function deleteJson(path: string, token: string) {
   const data = await readApiPayload(response);
 
   if (!response.ok) {
-    handleSessionErrorStatus(response.status, data);
+    await handleSessionErrorStatus(response.status, data);
     throw buildApiError("Error eliminando examen", response.status, path, data);
   }
 }
