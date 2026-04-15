@@ -9972,6 +9972,20 @@ export default function DashboardPage() {
       window.alert("Error: faltan datos de sesion. Recarga y vuelve a intentar.");
       return;
     }
+
+    const currentStatus = (groupPracticeState.status ?? "").toLowerCase();
+    const currentPhase = (groupPracticeState.phase ?? "").toLowerCase();
+    const isRunningQuestionFlow =
+      currentStatus === "active" && (currentPhase === "open" || currentPhase === "review");
+    if (isRunningQuestionFlow) {
+      const confirmCloseAndRestart = window.confirm(
+        "Esto cerrara la sesion activa y enviara a todos a sala de espera sin terminar la revision actual. Deseas continuar?",
+      );
+      if (!confirmCloseAndRestart) {
+        return;
+      }
+    }
+
     setClosingAndRestartingGroupPractice(true);
     const applyWaitingGroupState = (state: ExamGroupState, feedbackMessage: string) => {
       setGroupPracticeState(state);
@@ -9997,7 +10011,6 @@ export default function DashboardPage() {
       setExamFeedback(feedbackMessage, "success");
     };
     try {
-      const currentStatus = (groupPracticeState.status ?? "").toLowerCase();
       if (currentStatus === "active") {
         await postJson(`${resolveExamPracticeBasePath(selectedExam.id, activeExamContentContext)}/group/close`, user.token, {
           userId: user.id,
@@ -15104,7 +15117,7 @@ export default function DashboardPage() {
                       disabled={closingAndRestartingGroupPractice}
                       className="rounded-lg border border-blue-300 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {closingAndRestartingGroupPractice ? "Finalizando..." : "Finalizar e ir a espera"}
+                      {closingAndRestartingGroupPractice ? "Finalizando..." : "Forzar cierre e ir a espera"}
                     </button>
                   ) : null}
                   <button
