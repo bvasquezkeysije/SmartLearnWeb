@@ -10365,6 +10365,13 @@ export default function DashboardPage() {
     onCloseGroupPracticeRunner();
   };
 
+  const groupRoomClosedReturnLabel =
+    practiceOriginSection === "cursos"
+      ? "Volver a cursos"
+      : practiceOriginSection === "ia"
+        ? "Volver a IA"
+        : "Volver a examenes";
+
   const onCloseGroupWaitingRoom = async () => {
     if (!user || !selectedExam || !groupPracticeState) {
       return;
@@ -10464,7 +10471,11 @@ export default function DashboardPage() {
             if (suppressGroupRoomClosedModalRef.current) {
               return;
             }
-            setGroupRoomClosedMessage("La sala de espera fue cerrada por el anfitrion. Debes volver al modulo de examenes.");
+            setGroupRoomClosedMessage(
+              practiceOriginSection === "cursos"
+                ? "La sala de espera fue cerrada por el anfitrion. Debes volver al curso."
+                : "La sala de espera fue cerrada por el anfitrion. Debes volver al modulo de examenes.",
+            );
             setGroupRoomClosedAllowKeepViewing(false);
             setShowGroupRoomClosedModal(true);
             setGroupRoomClosedKeepViewing(false);
@@ -10474,6 +10485,23 @@ export default function DashboardPage() {
             return;
           }
         } catch (pollError) {
+          if (isRoomSessionInvalidError(pollError)) {
+            if (suppressGroupRoomClosedModalRef.current) {
+              return;
+            }
+            setGroupRoomClosedMessage(
+              practiceOriginSection === "cursos"
+                ? "La sala de espera fue cerrada por el anfitrion. Pulsa para volver al curso."
+                : "La sala de espera fue cerrada por el anfitrion. Pulsa para volver al modulo de examenes.",
+            );
+            setGroupRoomClosedAllowKeepViewing(false);
+            setShowGroupRoomClosedModal(true);
+            setGroupRoomClosedKeepViewing(false);
+            if (user) {
+              window.localStorage.removeItem(dashboardGroupPracticeViewKey(user.id));
+            }
+            return;
+          }
           if (!shouldAttemptSessionRecovery(pollError)) {
             return;
           }
@@ -21625,7 +21653,7 @@ export default function DashboardPage() {
                     onClick={onGoToExamsAfterGroupRoomClosed}
                     className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
                   >
-                    Volver a examenes
+                    {groupRoomClosedReturnLabel}
                   </button>
                 </div>
               </div>
@@ -21658,6 +21686,7 @@ type ApiResponsePayload = {
   error?: string;
   message?: string;
   authError?: boolean;
+  code?: string;
   [key: string]: unknown;
 };
 
@@ -21665,13 +21694,15 @@ class ApiHttpError extends Error {
   status: number;
   path: string;
   authFailure: boolean;
+  code: string | null;
 
-  constructor(message: string, status: number, path: string, authFailure: boolean) {
+  constructor(message: string, status: number, path: string, authFailure: boolean, code?: string | null) {
     super(message);
     this.name = "ApiHttpError";
     this.status = status;
     this.path = path;
     this.authFailure = authFailure;
+    this.code = code ?? null;
   }
 }
 
@@ -21754,7 +21785,29 @@ async function handleSessionErrorStatus(status: number, data: ApiResponsePayload
 
 function buildApiError(defaultMessage: string, status: number, path: string, data: ApiResponsePayload): ApiHttpError {
   const message = String(data.error || data.message || defaultMessage);
-  return new ApiHttpError(message, status, path, isAuthFailureResponse(status, data));
+  const code = typeof data.code === "string" && data.code.trim() ? data.code.trim() : null;
+  return new ApiHttpError(message, status, path, isAuthFailureResponse(status, data), code);
+}
+
+function isRoomSessionInvalidError(error: unknown): boolean {
+  if (error instanceof ApiHttpError) {
+    if (error.code === "room_session_invalid") {
+      return true;
+    }
+    const normalized = error.message
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    return normalized.includes("sesion de sala no es valida") || normalized.includes("room session");
+  }
+  if (error instanceof Error) {
+    const normalized = error.message
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    return normalized.includes("room_session_invalid") || normalized.includes("sesion de sala no es valida");
+  }
+  return false;
 }
 
 function sanitizeApiMessage(raw: string): string | null {
@@ -21838,7 +21891,13 @@ async function postJson(path: string, token: string, body: unknown): Promise<unk
   if (!response.ok) {
     await handleSessionErrorStatus(response.status, data, token);
     const apiError = buildApiError("Error procesando solicitud", response.status, path, data);
-    throw new ApiHttpError(`${apiError.message} (HTTP ${response.status} POST ${path})`, response.status, path, apiError.authFailure);
+    throw new ApiHttpError(
+      `${apiError.message} (HTTP ${response.status} POST ${path})`,
+      response.status,
+      path,
+      apiError.authFailure,
+      apiError.code,
+    );
   }
 
   return data;
