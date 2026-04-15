@@ -10473,8 +10473,8 @@ export default function DashboardPage() {
             }
             setGroupRoomClosedMessage(
               practiceOriginSection === "cursos"
-                ? "La sala de espera fue cerrada por el anfitrion. Debes volver al curso."
-                : "La sala de espera fue cerrada por el anfitrion. Debes volver al modulo de examenes.",
+                ? "Se ha cerrado la sala de espera. Quieres volver a cursos?"
+                : "Se ha cerrado la sala de espera. Quieres volver a examenes?",
             );
             setGroupRoomClosedAllowKeepViewing(false);
             setShowGroupRoomClosedModal(true);
@@ -10491,8 +10491,8 @@ export default function DashboardPage() {
             }
             setGroupRoomClosedMessage(
               practiceOriginSection === "cursos"
-                ? "La sala de espera fue cerrada por el anfitrion. Pulsa para volver al curso."
-                : "La sala de espera fue cerrada por el anfitrion. Pulsa para volver al modulo de examenes.",
+                ? "Se ha cerrado la sala de espera. Quieres volver a cursos?"
+                : "Se ha cerrado la sala de espera. Quieres volver a examenes?",
             );
             setGroupRoomClosedAllowKeepViewing(false);
             setShowGroupRoomClosedModal(true);
@@ -10520,9 +10520,11 @@ export default function DashboardPage() {
               return;
             }
             setGroupRoomClosedMessage(
-              "La sala de espera fue cerrada por el anfitrion. Deseas quedarte viendo el resultado final o volver al modulo de examenes?",
+              practiceOriginSection === "cursos"
+                ? "Se ha cerrado la sala de espera. Quieres volver a cursos?"
+                : "Se ha cerrado la sala de espera. Quieres volver a examenes?",
             );
-            setGroupRoomClosedAllowKeepViewing(true);
+            setGroupRoomClosedAllowKeepViewing(false);
             setShowGroupRoomClosedModal(true);
             setGroupRoomClosedKeepViewing(false);
             if (user) {
