@@ -235,7 +235,7 @@ const mergeGroupAnswers = (
     mergedByUser.set(key, {
       ...(incomingWins ? existing : answer),
       ...(incomingWins ? answer : existing),
-      selectedAnswer: incomingText || existingText,
+      selectedAnswer: incomingWins ? incomingText : existingText,
     });
   };
 
@@ -261,6 +261,8 @@ const mergeGroupState = (previous: ExamGroupState | null, incoming: ExamGroupSta
   const incomingStatus = (incoming.status ?? "").toLowerCase();
   const previousIndex = previous.currentQuestionIndex ?? 0;
   const incomingIndex = incoming.currentQuestionIndex ?? 0;
+  const previousVersion = Number(previous.questionVersion ?? 1);
+  const incomingVersion = Number(incoming.questionVersion ?? 1);
 
   // Ignorar snapshots tardíos que regresan a una pregunta anterior.
   if (previousStatus === "active" && incomingStatus === "active" && incomingIndex < previousIndex) {
@@ -273,7 +275,8 @@ const mergeGroupState = (previous: ExamGroupState | null, incoming: ExamGroupSta
     previous.currentQuestion?.id != null &&
     incoming.currentQuestion?.id != null &&
     previous.currentQuestion.id === incoming.currentQuestion.id &&
-    previousIndex === incomingIndex;
+    previousIndex === incomingIndex &&
+    previousVersion === incomingVersion;
 
   const mergedAnswers = sameQuestion
     ? mergeGroupAnswers(previous.currentAnswers, incoming.currentAnswers)
@@ -292,9 +295,17 @@ const mergeGroupState = (previous: ExamGroupState | null, incoming: ExamGroupSta
       return participant;
     }
 
+    const answeredByMergedAnswers = mergedAnswers.some(
+      (answer) =>
+        normalizeGroupUserKey(answer.userId) === participantKey &&
+        Boolean((answer.selectedAnswer ?? "").trim()),
+    );
+
     return {
       ...participant,
-      answeredCurrent: Boolean(participant.answeredCurrent) || Boolean(previousParticipant.answeredCurrent),
+      // Fuente de verdad: snapshot actual del backend + respuestas fusionadas de la misma ronda.
+      // Evita que "answeredCurrent" quede pegado por snapshots viejos.
+      answeredCurrent: Boolean(participant.answeredCurrent) || answeredByMergedAnswers,
       correctCurrent:
         participant.correctCurrent != null
           ? participant.correctCurrent
