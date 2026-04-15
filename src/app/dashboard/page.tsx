@@ -10617,27 +10617,35 @@ export default function DashboardPage() {
     const questionRuntimeKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`;
     const timerLimit = Math.max(0, groupPracticeState.currentQuestion.temporizadorSegundos ?? 0);
     const parsedStartedAt = toMillisOrZero(groupQuestionStartedAtEpochMs ?? groupQuestionStartedAt);
+    const phaseStartedAtMs = toMillisOrZero(groupPracticeState.phaseStartedAtEpochMs ?? groupPracticeState.phaseStartedAt);
+    const phaseEndsAtMs = toMillisOrZero(groupPracticeState.phaseEndsAtEpochMs ?? groupPracticeState.phaseEndsAt);
     if (groupQuestionRuntimeKeyRef.current !== questionRuntimeKey) {
       groupQuestionRuntimeKeyRef.current = questionRuntimeKey;
-      groupQuestionStartedAtMsRef.current = parsedStartedAt > 0 ? parsedStartedAt : getGroupServerNowMs();
+      groupQuestionStartedAtMsRef.current =
+        phaseStartedAtMs > 0 ? phaseStartedAtMs : parsedStartedAt > 0 ? parsedStartedAt : getGroupServerNowMs();
       setGroupTimerExpired(false);
       setGroupTimerExpiredQuestionKey(null);
       setGroupAutoSubmitKey(null);
       setGroupAutoAdvanceSecondsLeft(null);
       setGroupQuestionElapsedSeconds(0);
-      setGroupQuestionRemainingSeconds(timerLimit > 0 ? timerLimit : null);
+      if (phaseEndsAtMs > 0) {
+        setGroupQuestionRemainingSeconds(Math.max(0, Math.ceil((phaseEndsAtMs - getGroupServerNowMs()) / 1000)));
+      } else {
+        setGroupQuestionRemainingSeconds(timerLimit > 0 ? timerLimit : null);
+      }
     } else if (parsedStartedAt > 0 && groupQuestionStartedAtMsRef.current <= 0) {
       // Usa el timestamp del servidor si llega tarde, sin reiniciar cada poll.
       groupQuestionStartedAtMsRef.current = parsedStartedAt;
     }
 
     const tick = () => {
-      const startedAtMs = groupQuestionStartedAtMsRef.current > 0
-        ? groupQuestionStartedAtMsRef.current
-        : getGroupServerNowMs();
-      const elapsed = Math.max(0, Math.floor((getGroupServerNowMs() - startedAtMs) / 1000));
+      const serverNowMs = getGroupServerNowMs();
+      const startedAtMs = groupQuestionStartedAtMsRef.current > 0 ? groupQuestionStartedAtMsRef.current : serverNowMs;
+      const elapsed = Math.max(0, Math.floor((serverNowMs - startedAtMs) / 1000));
       setGroupQuestionElapsedSeconds(elapsed);
-      if (timerLimit > 0) {
+      if (phaseEndsAtMs > 0) {
+        setGroupQuestionRemainingSeconds(Math.max(0, Math.ceil((phaseEndsAtMs - serverNowMs) / 1000)));
+      } else if (timerLimit > 0) {
         setGroupQuestionRemainingSeconds(Math.max(0, timerLimit - elapsed));
       } else {
         setGroupQuestionRemainingSeconds(null);
@@ -10654,6 +10662,10 @@ export default function DashboardPage() {
     groupPracticeState?.currentQuestionIndex,
     groupPracticeState?.currentQuestion?.id,
     groupPracticeState?.currentQuestion?.temporizadorSegundos,
+    groupPracticeState?.phaseStartedAt,
+    groupPracticeState?.phaseStartedAtEpochMs,
+    groupPracticeState?.phaseEndsAt,
+    groupPracticeState?.phaseEndsAtEpochMs,
     groupQuestionStartedAt,
     groupQuestionStartedAtEpochMs,
     groupPracticeState?.serverNowEpochMs,
