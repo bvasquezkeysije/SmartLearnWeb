@@ -190,7 +190,9 @@ const buildGroupQuestionKey = (state: ExamGroupState | null): string | null => {
   if (!state || state.status !== "active" || !state.currentQuestion) {
     return null;
   }
-  return `${state.sessionId}:${state.currentQuestionIndex}:${state.currentQuestion.id}`;
+  const version = Number(state.questionVersion ?? 1);
+  const normalizedVersion = Number.isFinite(version) && version > 0 ? version : 1;
+  return `${state.sessionId}:${state.currentQuestionIndex}:${state.currentQuestion.id}:${normalizedVersion}`;
 };
 
 const normalizeGroupUserKey = (value: unknown): string => String(value ?? "").trim();
@@ -9816,7 +9818,10 @@ export default function DashboardPage() {
     if (!currentQuestion) {
       return;
     }
-    const submitQuestionKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${currentQuestion.id}`;
+    const submitQuestionKey = buildGroupQuestionKey(groupPracticeState);
+    if (!submitQuestionKey) {
+      return;
+    }
     const writtenAnswer = practiceWrittenAnswer.trim();
     const hasDraftForCurrentQuestion = groupDraftQuestionKey === submitQuestionKey;
     const selectedOptionForCurrentQuestion =
@@ -10614,7 +10619,10 @@ export default function DashboardPage() {
       return;
     }
 
-    const questionRuntimeKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`;
+    const questionRuntimeKey = buildGroupQuestionKey(groupPracticeState);
+    if (!questionRuntimeKey) {
+      return;
+    }
     const timerLimit = Math.max(0, groupPracticeState.currentQuestion.temporizadorSegundos ?? 0);
     const parsedStartedAt = toMillisOrZero(groupQuestionStartedAtEpochMs ?? groupQuestionStartedAt);
     const phaseStartedAtMs = toMillisOrZero(groupPracticeState.phaseStartedAtEpochMs ?? groupPracticeState.phaseStartedAt);
@@ -10677,7 +10685,10 @@ export default function DashboardPage() {
       return;
     }
 
-    const questionInputKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`;
+    const questionInputKey = buildGroupQuestionKey(groupPracticeState);
+    if (!questionInputKey) {
+      return;
+    }
     if (groupInputQuestionKeyRef.current === questionInputKey) {
       return;
     }
@@ -10723,7 +10734,10 @@ export default function DashboardPage() {
       return;
     }
 
-    const questionKey = `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`;
+    const questionKey = buildGroupQuestionKey(groupPracticeState);
+    if (!questionKey) {
+      return;
+    }
 
     // Evita auto-envios usando el "0s" de la pregunta anterior.
     if (groupQuestionRuntimeKeyRef.current !== questionKey) {
@@ -10769,10 +10783,7 @@ export default function DashboardPage() {
       return;
     }
 
-    const currentQuestionKey =
-      groupPracticeState && groupPracticeState.currentQuestion
-        ? `${groupPracticeState.sessionId}:${groupPracticeState.currentQuestionIndex}:${groupPracticeState.currentQuestion.id}`
-        : null;
+    const currentQuestionKey = buildGroupQuestionKey(groupPracticeState);
     const serverRevealAnswers = Boolean(groupPracticeState?.revealAnswers);
     const phaseEndsAtMs = toMillisOrZero(groupPracticeState?.phaseEndsAtEpochMs ?? groupPracticeState?.phaseEndsAt);
 
